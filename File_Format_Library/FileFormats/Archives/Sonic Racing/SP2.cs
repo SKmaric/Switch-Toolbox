@@ -54,6 +54,7 @@ namespace FirstPlugin
         private const uint ChunkModelData = 0xCA121903;
         private const uint ChunkShaderData = 0x777A9B0E;
         private const uint ChunkMaterialData = 0x79C90901;
+        private const uint ChunkCollisionData = 0xD562B70B;
 
         private List<ChunkHeader> Chunks = new List<ChunkHeader>();
         public void Load(System.IO.Stream stream)
@@ -116,6 +117,11 @@ namespace FirstPlugin
                             matFile.Read(reader);
                             chunk.ChunkData = matFile;
                             break;
+                        case ChunkCollisionData:
+                            CollisionFile collisionFile = new CollisionFile();
+                            collisionFile.Read(reader);
+                            chunk.ChunkData = collisionFile;
+                            break;
                     }
 
                     reader.Seek(chunk.Position + chunk.ChunkSize, System.IO.SeekOrigin.Begin);
@@ -166,12 +172,6 @@ namespace FirstPlugin
                                 fileInfo.FileName = animFile.FileName;
                                 fileInfo.FileData = animFile.Data;
                             }
-                            if (Chunks[i].ChunkData is MaterialFile)
-                            {
-                                MaterialFile animFile = (MaterialFile)Chunks[i].ChunkData;
-                                fileInfo.FileName = animFile.FileName;
-                                fileInfo.FileData = animFile.Data;
-                            }
                             if (Chunks[i].ChunkData is ModelFile)
                             {
                                 ModelFile modelFile = (ModelFile)Chunks[i].ChunkData;
@@ -181,12 +181,18 @@ namespace FirstPlugin
                                 if (Chunks[i].FileSize != 0)
                                     BufferData = reader.ReadBytes((int)Chunks[i].FileSize);
 
-                                fileInfo.FileData = Utils.CombineByteArray(modelFile.Data, modelFile.Data2, BufferData);
+                                fileInfo.FileData = Utils.CombineByteArray(modelFile.Data, modelFile.Data2, modelFile.Data3, BufferData);
 
 
                                 //Don't advance the stream unless the chunk has a pointer
                                 if (Chunks[i].NextFilePtr != 0)
                                     reader.Seek(pos + Chunks[i].NextFilePtr, System.IO.SeekOrigin.Begin);
+                            }
+                            if (Chunks[i].ChunkData is CollisionFile)
+                            {
+                                CollisionFile animFile = (CollisionFile)Chunks[i].ChunkData;
+                                fileInfo.FileName = animFile.FileName;
+                                fileInfo.FileData = animFile.Data;
                             }
                         }
                         else //Else get the data from GPU
@@ -201,6 +207,11 @@ namespace FirstPlugin
                             else
                                 fileInfo.FileData = new byte[0];
                         }
+
+                        //Organise files such as mb into folders - won't be necessary when actual loading is implemented
+                        fileInfo.FileName = fileInfo.FileName.Replace(':', '/');
+                        fileInfo.FileName = fileInfo.FileName.Replace('|', '/');
+
                         files.Add(fileInfo);
 
                         //Don't advance the stream unless the chunk has a pointer
@@ -241,6 +252,9 @@ namespace FirstPlugin
 
             public byte[] Data;
             public byte[] Data2;
+            public byte[] Data3;
+
+            bool PadName = true;
 
             public void Read(FileReader reader)
             {
@@ -250,7 +264,7 @@ namespace FirstPlugin
                 uint unk4 = reader.ReadUInt32(); //Set to 1
                 uint SectionSize = reader.ReadUInt32(); //At the end, the file name
                 uint Padding = reader.ReadUInt32();
-                uint NextSectionOffset = reader.ReadUInt32();
+                uint Section2Offset = reader.ReadUInt32();
 
                 reader.Seek(pos, System.IO.SeekOrigin.Begin);
                 //Model FILE
@@ -258,10 +272,44 @@ namespace FirstPlugin
 
                 FileName = reader.ReadString(Syroot.BinaryData.BinaryStringFormat.ZeroTerminated);
 
-                //Todo
-                Data2 = new byte[0];
-        //        reader.Seek(NextSectionOffset, System.IO.SeekOrigin.Begin);
-        //       Data2 = reader.ReadBytes();
+                if (PadName)
+                {
+                    reader.Seek(pos, System.IO.SeekOrigin.Begin);
+                    Data = reader.ReadBytes((int)Section2Offset);
+                }
+
+                //Section 2
+                reader.Seek(pos+Section2Offset, System.IO.SeekOrigin.Begin);
+
+                uint unk5 = reader.ReadUInt32();
+                uint unk6 = reader.ReadUInt32(); //Set to 2
+                uint SectionSize2 = reader.ReadUInt32();
+
+                reader.Seek(pos + Section2Offset + 96, System.IO.SeekOrigin.Begin);
+                uint Section2OffsetDupe = reader.ReadUInt32(); //idk
+                uint unk7 = reader.ReadUInt32();
+                uint Section3Offset = reader.ReadUInt32();
+                uint unk8 = reader.ReadUInt32();
+                uint Section35Offset = reader.ReadUInt32(); //i guess section3 is split?
+                uint unk9 = reader.ReadUInt32();
+                uint BufferOffset = reader.ReadUInt32();
+
+                reader.Seek(pos+Section2Offset, System.IO.SeekOrigin.Begin);
+
+                Data2 = reader.ReadBytes((int)SectionSize2 - (int)Section2Offset);
+
+                FileName2 = reader.ReadString(Syroot.BinaryData.BinaryStringFormat.ZeroTerminated);
+
+                if (PadName)
+                {
+                    reader.Seek(pos + Section2Offset, System.IO.SeekOrigin.Begin);
+                    Data2 = reader.ReadBytes((int)Section3Offset - (int)Section2Offset);
+                }
+
+                //Section 3
+                reader.Seek(pos + Section3Offset, System.IO.SeekOrigin.Begin);
+                Data3 = reader.ReadBytes((int)BufferOffset - (int)Section3Offset);
+
             }
         }
 
@@ -341,6 +389,51 @@ namespace FirstPlugin
 
         }
 
+        public class CollisionFile : IChunkData
+        {
+            public string FileName = "";
+            public byte[] Data;
+
+            public void Read(FileReader reader)
+            {
+                long pos = reader.Position;
+
+                uint unk3 = reader.ReadUInt32();
+                uint unk4 = reader.ReadUInt32(); //Set to 1
+                uint SectionSize = reader.ReadUInt32(); //At the end, the file name
+                uint Padding = reader.ReadUInt32();
+
+                reader.Seek(pos, System.IO.SeekOrigin.Begin);
+                //Material FILE
+                Data = reader.ReadBytes((int)SectionSize);
+
+                FileName = reader.ReadString(Syroot.BinaryData.BinaryStringFormat.ZeroTerminated);
+            }
+        }
+
+        public class CollisionMaterialFile : IChunkData
+        {
+            //Todo
+            public string FileName = "";
+            public byte[] Data;
+
+            public void Read(FileReader reader)
+            {
+                long pos = reader.Position;
+
+                uint unk3 = reader.ReadUInt32();
+                uint unk4 = reader.ReadUInt32(); //Set to 1
+                uint SectionSize = reader.ReadUInt32(); //At the end, the file name
+                uint Padding = reader.ReadUInt32();
+                uint FileSize = reader.ReadUInt32(); //Duplicate of SectionSize?
+
+                reader.Seek(pos, System.IO.SeekOrigin.Begin);
+                //Material FILE
+                Data = reader.ReadBytes((int)SectionSize);
+
+                FileName = reader.ReadString(Syroot.BinaryData.BinaryStringFormat.ZeroTerminated);
+            }
+        }
 
         public void Save(System.IO.Stream stream)
         {

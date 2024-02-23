@@ -392,6 +392,8 @@ namespace FirstPlugin
             Formats.Add(typeof(SWU));
             Formats.Add(typeof(SPC));
             Formats.Add(typeof(GameDataToc));
+            Formats.Add(typeof(XPAC));
+            Formats.Add(typeof(Siff));
             Formats.Add(typeof(NUSHDB));
             Formats.Add(typeof(MKGPDX_PAC));
             Formats.Add(typeof(LZARC));
