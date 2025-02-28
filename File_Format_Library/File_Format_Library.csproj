@@ -239,6 +239,7 @@
     <Compile Include="FileFormats\Archives\QuickAccess\QuickAccessFolder.cs" />
     <Compile Include="FileFormats\Archives\RARC\RARC_Parser.cs" />
     <Compile Include="FileFormats\Archives\Sonic Racing\Siff.cs" />
+    <Compile Include="FileFormats\Archives\Sonic Racing\SPCEnums.cs" />
     <Compile Include="FileFormats\Archives\Sonic Racing\SubFiles\Forest.cs" />
     <Compile Include="FileFormats\Archives\Sonic Racing\SubFiles\SIFWrapper.cs" />
     <Compile Include="FileFormats\Archives\Sonic Racing\SubFiles\CollisionData.cs" />
@@ -413,7 +414,6 @@
     <Compile Include="FileFormats\Archives\RARC\RARC.cs" />
     <Compile Include="FileFormats\Archives\Sonic Racing\GameDataToc.cs" />
     <Compile Include="FileFormats\Archives\Sonic Racing\SPC.cs" />
-    <Compile Include="FileFormats\Archives\Sonic Racing\SWU.cs" />
     <Compile Include="FileFormats\Archives\Sonic Racing\SP2.cs" />
     <Compile Include="FileFormats\Archives\TMPK.cs" />
     <Compile Include="FileFormats\Archives\U8.cs" />

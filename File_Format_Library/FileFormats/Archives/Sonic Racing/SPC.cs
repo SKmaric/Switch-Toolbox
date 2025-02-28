@@ -1,20 +1,28 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using Toolbox.Library;
 using Toolbox.Library.IO;
+using SPC;
+using DataType = SPC.DataType;
+using System.Drawing;
+using System.Windows.Forms;
+using Toolbox.Library.Forms;
+using Toolbox.Library.NodeWrappers;
 
 namespace FirstPlugin
 {
-    public class SPC : IFileFormat, IArchiveFile
+    public class SPC : TreeNodeFile, IFileFormat, IArchiveFile
     {
         public FileType FileType { get; set; } = FileType.Archive;
 
         public bool CanSave { get; set; }
-        public string[] Description { get; set; } = new string[] { "Sonic and All Stars Racing Transformed Archive  (PC)" };
-        public string[] Extension { get; set; } = new string[] { "*.spc" };
+        public string[] Description { get; set; } = new string[] { "Sonic and All Stars Racing Transformed Archive" };
+        public string[] Extension { get; set; } = new string[] { "*.spc", "*.swu" };
         public string FileName { get; set; }
         public string FilePath { get; set; }
         public IFileInfo IFileInfo { get; set; }
@@ -23,7 +31,7 @@ namespace FirstPlugin
         {
             using (var reader = new Toolbox.Library.IO.FileReader(stream, true))
             {
-                return Utils.HasExtension(FileName, ".spc");
+                return (Utils.HasExtension(FileName, ".spc") | (Utils.HasExtension(FileName, ".swu")));
             }
         }
 
@@ -46,16 +54,6 @@ namespace FirstPlugin
         public bool CanReplaceFiles { get; set; }
         public bool CanDeleteFiles { get; set; }
 
-        private const uint ChunkTextureFile = 0xD6D1820C;
-        private const uint ChunkMetaInfo = 0xB111B40E;
-        private const uint ChunkAnimInfo = 0x22008309;
-        private const uint ChunkAnimData = 0x29318F0A;
-        private const uint ChunkSkeletonData = 0x115AB800;
-        private const uint ChunkModelData = 0xCA121903;
-        private const uint ChunkShaderData = 0x777A9B0E;
-        private const uint ChunkMaterialData = 0x79C90901;
-        private const uint ChunkCollisionData = 0xD562B70B;
-
         private List<ChunkHeader> Chunks = new List<ChunkHeader>();
         public void Load(System.IO.Stream stream)
         {
@@ -63,74 +61,137 @@ namespace FirstPlugin
 
             using (var reader = new FileReader(stream))
             {
+                int test = reader.ReadInt32();
+                bool isLittleEndian = Enum.IsDefined(typeof(DataType), test);
+                reader.SetByteOrder(!isLittleEndian);
+
+                reader.Seek(-4, SeekOrigin.Current);
+
                 while (!reader.EndOfStream)
                 {
                     ChunkHeader chunk = new ChunkHeader();
                     chunk.Position = reader.Position;
-                    chunk.Identifier = reader.ReadUInt32();
-                    uint unk = reader.ReadUInt32();
-                    chunk.ChunkSize = reader.ReadUInt32();
-                    chunk.ChunkId = reader.ReadUInt32();
-                    chunk.NextFilePtr = reader.ReadUInt32();
-                    chunk.FileSize = reader.ReadUInt32();
+                    chunk.Identifier = (DataType)reader.ReadUInt32();
+                    chunk.ToolVersion = reader.ReadUInt32();
+                    chunk.CpuRelativeOffsetNextEntry = reader.ReadUInt32();
+                    chunk.CpuDataLength = reader.ReadUInt32();
+                    chunk.GpuRelativeOffsetNextEntry = reader.ReadUInt32();
+                    chunk.GpuDataLength = reader.ReadUInt32();
                     uint unk2 = reader.ReadUInt32();
                     uint unk3 = reader.ReadUInt32();
                     Chunks.Add(chunk);
 
-                    var Identifer = chunk.Identifier.Reverse();
+                    uint resourceid = reader.ReadUInt32();
+                    uint tmpOffset = 0;
 
-                    switch (Identifer)
+                    if (chunk.Identifier != DataType.Nothing)
                     {
-                        case ChunkTextureFile:
-                            if (chunk.ChunkSize > 0x64)
+                        if (unk3 != 0)
+                        {
+                            if (chunk.Identifier != DataType.SlResourceCollision)
                             {
-                                reader.Seek(chunk.Position + 0x64, System.IO.SeekOrigin.Begin);
+                                tmpOffset = reader.ReadUInt32();
+                            }
+                            else
+                            {
+                                reader.Seek(chunk.Position + 0x40, SeekOrigin.Begin);
+                                tmpOffset = 0x30 + reader.ReadUInt32() * 0x14;
+                            }
+                            if (tmpOffset != 0)
+                            {
+                                reader.Seek(chunk.Position + 0x20 + tmpOffset, SeekOrigin.Begin);
                                 chunk.FileName = reader.ReadString(Syroot.BinaryData.BinaryStringFormat.ZeroTerminated);
                             }
+                        }
+                        //else
+                        //{
+                        //    reader.Seek(chunk.Position + 0x20 + 0x18 + 0x1C, SeekOrigin.Begin);
+                        //    tmpOffset = reader.ReadUInt32();
+                        //    if (tmpOffset != 0)
+                        //    {
+                        //        reader.Seek(chunk.Position + 0x20 + tmpOffset, SeekOrigin.Begin);
+                        //        chunk.FileName = reader.ReadString(Syroot.BinaryData.BinaryStringFormat.ZeroTerminated);
+                        //    }
+                        //}
+                    }
+
+                    reader.Seek(chunk.Position + 0x20, System.IO.SeekOrigin.Begin);
+
+                    switch (chunk.Identifier)
+                    {
+                        case DataType.SlTexture:
+                            if (chunk.CpuRelativeOffsetNextEntry > 0x64)
+                            {
+                                if (tmpOffset == 0xD4) // determine Wii U format texture
+                                {
+                                    SWUTexture texture = new SWUTexture();
+                                    texture.ImageKey = "texture";
+                                    texture.SelectedImageKey = "texture";
+                                    reader.SeekBegin(chunk.Position + 72);
+                                    texture.ReadChunk(reader);
+                                    chunk.ChunkData = texture;
+                                    texture.Text = chunk.FileName;
+                                    Nodes.Add(texture);
+                                }
+                                else
+                                {
+                                    TextureFile texture = new TextureFile();
+                                    texture.ImageKey = "texture";
+                                    texture.SelectedImageKey = "texture";
+                                    texture.Text = chunk.FileName;
+                                    chunk.ChunkData = texture;
+                                }
+                                //reader.Seek(chunk.Position + 0x64, System.IO.SeekOrigin.Begin);
+                                //chunk.FileName = reader.ReadString(Syroot.BinaryData.BinaryStringFormat.ZeroTerminated);
+                            }
                             break;
-                        case ChunkMetaInfo:
+                        case DataType.Nothing:
                             break;
-                        case ChunkAnimInfo:
-                            if (chunk.ChunkSize > 0xB0)
+                        case DataType.SeDefinitionAnimationStreamNode:
+                            if (chunk.CpuRelativeOffsetNextEntry > 0xB0)
                             {
                                 reader.Seek(chunk.Position + 0xB0, System.IO.SeekOrigin.Begin);
                                 chunk.FileName = reader.ReadString(Syroot.BinaryData.BinaryStringFormat.ZeroTerminated);
                             }
                             break;
-                        case ChunkAnimData:
+                        case DataType.SlAnim:
                             AnimationFile animFile = new AnimationFile();
                             animFile.Read(reader);
                             chunk.ChunkData = animFile;
                             break;
-                        case ChunkSkeletonData:
+                        case DataType.SlSkeleton:
                             SkeletonFile skelFile = new SkeletonFile();
                             skelFile.Read(reader);
                             chunk.ChunkData = skelFile;
                             break;
-                        case ChunkModelData:
+                        case DataType.SlModel:
                             ModelFile modelFile = new ModelFile();
                             modelFile.Read(reader);
                             chunk.ChunkData = modelFile;
                             break;
-                        case ChunkMaterialData:
+                        case DataType.SlMaterial2:
                             MaterialFile matFile = new MaterialFile();
                             matFile.Read(reader);
                             chunk.ChunkData = matFile;
                             break;
-                        case ChunkCollisionData:
+                        case DataType.SlResourceCollision:
                             CollisionFile collisionFile = new CollisionFile();
                             collisionFile.Read(reader);
                             chunk.ChunkData = collisionFile;
                             break;
                     }
 
+                    chunk.FileName = chunk.FileName.Replace(':', '/');
+                    chunk.FileName = chunk.FileName.Replace('|', '/');
+
                     chunk.FileName = chunk.FileName.RemoveIllegaleFolderNameCharacters();
 
-                    reader.Seek(chunk.Position + chunk.ChunkSize, System.IO.SeekOrigin.Begin);
+                    reader.Seek(chunk.Position + chunk.CpuRelativeOffsetNextEntry, System.IO.SeekOrigin.Begin);
                 }
 
                 ReadGPUFile(FilePath);
             }
+            TreeHelper.CreateFileDirectory(this);
         }
 
         private void ReadGPUFile(string FileName)
@@ -145,11 +206,11 @@ namespace FirstPlugin
             {
                 for (int i = 0; i < Chunks.Count; i++)
                 {
-                    if (Chunks[i].FileSize != 0 || Chunks[i].FileName != string.Empty || Chunks[i].ChunkData != null)
+                    if (Chunks[i].GpuDataLength != 0 || Chunks[i].FileName != string.Empty || Chunks[i].ChunkData != null)
                     {
                         long pos = reader.Position;
 
-                        var identifer = Chunks[i].Identifier.Reverse();
+                        var identifer = Chunks[i].Identifier;
 
                         var fileInfo = new FileInfo();
 
@@ -164,15 +225,15 @@ namespace FirstPlugin
                             }
                             if (Chunks[i].ChunkData is SkeletonFile)
                             {
-                                SkeletonFile animFile = (SkeletonFile)Chunks[i].ChunkData;
-                                fileInfo.FileName = animFile.FileName;
-                                fileInfo.FileData = animFile.Data;
+                                SkeletonFile skelFile = (SkeletonFile)Chunks[i].ChunkData;
+                                fileInfo.FileName = skelFile.FileName;
+                                fileInfo.FileData = skelFile.Data;
                             }
                             if (Chunks[i].ChunkData is MaterialFile)
                             {
-                                MaterialFile animFile = (MaterialFile)Chunks[i].ChunkData;
-                                fileInfo.FileName = animFile.FileName;
-                                fileInfo.FileData = animFile.Data;
+                                MaterialFile matFile = (MaterialFile)Chunks[i].ChunkData;
+                                fileInfo.FileName = matFile.FileName;
+                                fileInfo.FileData = matFile.Data;
                             }
                             if (Chunks[i].ChunkData is ModelFile)
                             {
@@ -180,15 +241,15 @@ namespace FirstPlugin
                                 fileInfo.FileName = modelFile.FileName;
 
                                 byte[] BufferData = new byte[0];
-                                if (Chunks[i].FileSize != 0)
-                                    BufferData = reader.ReadBytes((int)Chunks[i].FileSize);
+                                if (Chunks[i].GpuDataLength != 0)
+                                    BufferData = reader.ReadBytes((int)Chunks[i].GpuDataLength);
 
                                 fileInfo.FileData = Utils.CombineByteArray(modelFile.Data, modelFile.Data2, modelFile.Data3, BufferData);
 
 
                                 //Don't advance the stream unless the chunk has a pointer
-                                if (Chunks[i].NextFilePtr != 0)
-                                    reader.Seek(pos + Chunks[i].NextFilePtr, System.IO.SeekOrigin.Begin);
+                                if (Chunks[i].GpuRelativeOffsetNextEntry != 0)
+                                    reader.Seek(pos + Chunks[i].GpuRelativeOffsetNextEntry, System.IO.SeekOrigin.Begin);
                             }
                             if (Chunks[i].ChunkData is CollisionFile)
                             {
@@ -196,16 +257,45 @@ namespace FirstPlugin
                                 fileInfo.FileName = animFile.FileName;
                                 fileInfo.FileData = animFile.Data;
                             }
+                            if (Chunks[i].ChunkData is SWUTexture)
+                            {
+                                SWUTexture texFile = (SWUTexture)Chunks[i].ChunkData;
+                                if (Chunks[i].GpuDataLength != 0)
+                                    texFile.ImageData = reader.ReadBytes((int)Chunks[i].GpuDataLength);
+                            }
+                            if (Chunks[i].ChunkData is TextureFile)
+                            {
+                                TextureFile texFile = (TextureFile)Chunks[i].ChunkData;
+
+                                if (Chunks[i].GpuDataLength != 0)
+                                {
+                                    fileInfo.FileData = reader.ReadBytes((int)Chunks[i].GpuDataLength);
+                                    try
+                                    {
+                                        
+                                        var texture = new DDS(fileInfo.FileData);
+                                        texture.WiiUSwizzle = false;
+                                        texture.ImageKey = "texture";
+                                        texture.SelectedImageKey = "texture";
+                                        texture.Text = Chunks[i].FileName;
+                                        Nodes.Add(texture);
+                                    }
+                                    catch
+                                    {
+                                        fileInfo.FileName = Chunks[i].FileName;
+                                    }
+                                }
+                            }
                         }
                         else //Else get the data from GPU
                         {
                             if (Chunks[i].FileName != string.Empty)
                                 fileInfo.FileName = $"{Chunks[i].FileName}";
                             else
-                                fileInfo.FileName = $"{i} {Chunks[i].ChunkId} {identifer.ToString("X")}";
+                                fileInfo.FileName = $"{i} {Chunks[i].CpuDataLength} {identifer.ToString("X")}";
 
-                            if (Chunks[i].FileSize != 0)
-                                fileInfo.FileData = reader.ReadBytes((int)Chunks[i].FileSize);
+                            if (Chunks[i].GpuDataLength != 0)
+                                fileInfo.FileData = reader.ReadBytes((int)Chunks[i].GpuDataLength);
                             else
                                 fileInfo.FileData = new byte[0];
                         }
@@ -217,8 +307,8 @@ namespace FirstPlugin
                         files.Add(fileInfo);
 
                         //Don't advance the stream unless the chunk has a pointer
-                        if (Chunks[i].NextFilePtr != 0)
-                            reader.Seek(pos + Chunks[i].NextFilePtr, System.IO.SeekOrigin.Begin);
+                        if (Chunks[i].GpuRelativeOffsetNextEntry != 0)
+                            reader.Seek(pos + Chunks[i].GpuRelativeOffsetNextEntry, System.IO.SeekOrigin.Begin);
                     }
                 }
             }
@@ -235,19 +325,20 @@ namespace FirstPlugin
         {
             public IChunkData ChunkData;
 
-            public uint Identifier;
+            public DataType Identifier;
             public long Position;
-            public uint ChunkSize;
-            public uint ChunkId;
-            public uint NextFilePtr;
-            public uint FileSize;
+            public uint ToolVersion;
+            public uint CpuRelativeOffsetNextEntry;
+            public uint CpuDataLength;
+            public uint GpuRelativeOffsetNextEntry;
+            public uint GpuDataLength;
 
             public string FileName = "";
         }
 
         //Info in CPU file about the model
         //Note the GPU file chunk linked from this contains the buffers
-        public class ModelFile : IChunkData
+        public class ModelFile : STGenericWrapper, IChunkData
         {
             public string FileName = "";
             public string FileName2 = ""; //Yeah there's another file for some reason
@@ -313,7 +404,7 @@ namespace FirstPlugin
             }
         }
 
-        public class MaterialFile : IChunkData
+        public class MaterialFile : STGenericWrapper, IChunkData
         {
             public string FileName = "";
             public byte[] Data;
@@ -335,7 +426,7 @@ namespace FirstPlugin
             }
         }
 
-        public class SkeletonFile : IChunkData
+        public class SkeletonFile : STGenericWrapper, IChunkData
         {
             public string FileName = "";
             public byte[] Data;
@@ -357,7 +448,7 @@ namespace FirstPlugin
             }
         }
 
-        public class AnimationFile : IChunkData
+        public class AnimationFile : STGenericWrapper, IChunkData
         {
             public string FileName = "";
             public byte[] Data;
@@ -379,9 +470,125 @@ namespace FirstPlugin
             }
         }
 
-        public class TextureFile : IChunkData
+        public class TextureFile : DDS, IChunkData
         {
 
+        }
+
+        public class SWUTexture : STGenericTexture, IChunkData
+        {
+            public byte[] ImageData;
+
+            public FileType FileType { get; set; } = FileType.Image;
+
+            public override bool CanEdit { get; set; } = false;
+
+            public override TEX_FORMAT[] SupportedFormats
+            {
+                get
+                {
+                    return new TEX_FORMAT[] {
+                    TEX_FORMAT.R8G8B8A8_UNORM,
+                };
+                }
+            }
+
+            public override void OnClick(TreeView treeview)
+            {
+                ImageEditorBase editor = (ImageEditorBase)LibraryGUI.GetActiveContent(typeof(ImageEditorBase));
+                if (editor == null)
+                {
+                    editor = new ImageEditorBase();
+                    editor.Dock = DockStyle.Fill;
+                    LibraryGUI.LoadEditor(editor);
+                }
+
+                if (GX2Surface != null)
+                {
+                    var tex = Bfres.Structs.FTEX.FromGx2Surface(GX2Surface, Text);
+                    editor.LoadProperties(tex);
+                }
+
+                editor.Text = Text;
+                editor.LoadImage(this);
+            }
+
+            GX2.GX2Surface GX2Surface;
+
+            public void ReadChunk(FileReader reader)
+            {
+                reader.SetByteOrder(true);
+
+                Console.WriteLine("TEX pos " + reader.Position);
+                GX2Surface = new GX2.GX2Surface();
+                GX2Surface.dim = reader.ReadUInt32();
+                GX2Surface.width = reader.ReadUInt32();
+                GX2Surface.height = reader.ReadUInt32();
+                GX2Surface.depth = reader.ReadUInt32();
+                GX2Surface.numMips = reader.ReadUInt32();
+                GX2Surface.format = reader.ReadUInt32();
+                GX2Surface.aa = reader.ReadUInt32();
+                GX2Surface.use = reader.ReadUInt32();
+                GX2Surface.imageSize = reader.ReadUInt32();
+                GX2Surface.imagePtr = reader.ReadUInt32();
+                GX2Surface.mipSize = reader.ReadUInt32();
+                GX2Surface.mipPtr = reader.ReadUInt32();
+                GX2Surface.tileMode = reader.ReadUInt32();
+                GX2Surface.swizzle = reader.ReadUInt32();
+                GX2Surface.alignment = reader.ReadUInt32();
+                GX2Surface.pitch = reader.ReadUInt32();
+                GX2Surface.mipOffset = reader.ReadUInt32s(13);
+                GX2Surface.firstMip = reader.ReadUInt32();
+                GX2Surface.imageCount = reader.ReadUInt32();
+                GX2Surface.firstSlice = reader.ReadUInt32();
+                GX2Surface.numSlices = reader.ReadUInt32();
+                GX2Surface.compSel = reader.ReadBytes(4);
+                GX2Surface.texRegs = reader.ReadUInt32s(4);
+
+                RedChannel = GX2ChanneToGeneric((Syroot.NintenTools.Bfres.GX2.GX2CompSel)GX2Surface.compSel[0]);
+                GreenChannel = GX2ChanneToGeneric((Syroot.NintenTools.Bfres.GX2.GX2CompSel)GX2Surface.compSel[1]);
+                BlueChannel = GX2ChanneToGeneric((Syroot.NintenTools.Bfres.GX2.GX2CompSel)GX2Surface.compSel[2]);
+                AlphaChannel = GX2ChanneToGeneric((Syroot.NintenTools.Bfres.GX2.GX2CompSel)GX2Surface.compSel[3]);
+
+                if (GX2Surface.numMips > 13)
+                    return;
+
+                Width = GX2Surface.width;
+                Height = GX2Surface.height;
+                MipCount = GX2Surface.numMips;
+                ArrayCount = GX2Surface.numArray;
+                Format = Bfres.Structs.FTEX.ConvertFromGx2Format((Syroot.NintenTools.Bfres.GX2.GX2SurfaceFormat)GX2Surface.format);
+            }
+
+            private STChannelType GX2ChanneToGeneric(Syroot.NintenTools.Bfres.GX2.GX2CompSel comp)
+            {
+                if (comp == Syroot.NintenTools.Bfres.GX2.GX2CompSel.ChannelR) return STChannelType.Red;
+                else if (comp == Syroot.NintenTools.Bfres.GX2.GX2CompSel.ChannelG) return STChannelType.Green;
+                else if (comp == Syroot.NintenTools.Bfres.GX2.GX2CompSel.ChannelB) return STChannelType.Blue;
+                else if (comp == Syroot.NintenTools.Bfres.GX2.GX2CompSel.ChannelA) return STChannelType.Alpha;
+                else if (comp == Syroot.NintenTools.Bfres.GX2.GX2CompSel.Always0) return STChannelType.Zero;
+                else return STChannelType.One;
+            }
+
+            public override void SetImageData(Bitmap bitmap, int ArrayLevel)
+            {
+                throw new NotImplementedException("Cannot set image data! Operation not implemented!");
+            }
+
+            public override byte[] GetImageData(int ArrayLevel = 0, int MipLevel = 0, int DepthLevel = 0)
+            {
+                if (GX2Surface != null)
+                {
+                    GX2Surface.data = ImageData;
+                    GX2Surface.mipData = ImageData;
+
+                    return GX2.Decode(GX2Surface, ArrayLevel, MipLevel);
+                }
+                else
+                {
+                    return ImageData;
+                }
+            }
         }
 
         public class TextureInfo : IChunkData
@@ -389,7 +596,7 @@ namespace FirstPlugin
 
         }
 
-        public class CollisionFile : IChunkData
+        public class CollisionFile : STGenericWrapper, IChunkData
         {
             public string FileName = "";
             public byte[] Data;

@@ -389,7 +389,7 @@ namespace FirstPlugin
             Formats.Add(typeof(TEX3DS));
             Formats.Add(typeof(NXARC));
             Formats.Add(typeof(SP2));
-            Formats.Add(typeof(SWU));
+            //Formats.Add(typeof(SWU));
             Formats.Add(typeof(SPC));
             Formats.Add(typeof(GameDataToc));
             Formats.Add(typeof(XPAC));
