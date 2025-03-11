@@ -5,6 +5,8 @@ using System.Text;
 using System.Threading.Tasks;
 using Toolbox.Library;
 using Toolbox.Library.IO;
+using FirstPlugin.FileFormats.Archives.Sonic_Racing;
+using System.IO;
 
 namespace FirstPlugin
 {
@@ -72,8 +74,7 @@ namespace FirstPlugin
                     uint padding = reader.ReadUInt32();
                     returnpos = reader.Position;
 
-                    fileInfo.FileName = hash.ToString("X8");
-                    fileInfo.FileName = AssignHashName(fileInfo.FileName);
+                    fileInfo.FileName = AssignHashName(hash);
 
                     reader.Position = offset;
 
@@ -121,17 +122,28 @@ namespace FirstPlugin
                     {
                         if (decompressZlib)
                         {
-                            if (isRELO > 0)
-                                fileInfo.FileName = fileInfo.FileName + ".sif";
-                            else
-                                fileInfo.FileName = fileInfo.FileName + ".sig";
+                            if (fileInfo.FileName.Contains(".zif"))
+                                fileInfo.FileName = fileInfo.FileName.Replace(".zif", ".sif");
+                            else if (fileInfo.FileName.Contains(".zig"))
+                                fileInfo.FileName = fileInfo.FileName.Replace(".zig", ".sig");
+                            else // if hash name isn't found
+                            {
+                                if (isRELO > 0)
+                                    fileInfo.FileName = fileInfo.FileName + ".sif";
+                                else
+                                    fileInfo.FileName = fileInfo.FileName + ".sig";
+                            }
+
                         }
-                        else
+                        else // if hash name isn't found
                         {
-                            if (isRELO > 0)
-                                fileInfo.FileName = fileInfo.FileName + ".zif";
-                            else
-                                fileInfo.FileName = fileInfo.FileName + ".zig";
+                            if (! (fileInfo.FileName.Contains(".zif")) || (fileInfo.FileName.Contains(".zig")))
+                            {
+                                if (isRELO > 0)
+                                    fileInfo.FileName = fileInfo.FileName + ".zif";
+                                else
+                                    fileInfo.FileName = fileInfo.FileName + ".zig";
+                            }
                         }
                     }
 
@@ -169,139 +181,58 @@ namespace FirstPlugin
 
         }
 
-        public string AssignHashName(string fileHash)
+        public string AssignHashName(uint fileHash)
         {
-            var NameLookupDictionary = new Dictionary<string, string>()
-            {
-                //Base.xpac (PC)
-                {"70FE460F", "AchievementsList.dat"},
-                {"7399063B", "AllProfiles.dat"},
-                {"4059BC33", "AllGadgets"},
-                {"5B16F914", "AllGadgets"},
-                {"C8F6151F", "DebugLights"},
-                {"77CC3C42", "DebugLights"},
-                {"332A499B", "EffectsParams.dat"},
-                {"BBE936E5", "GadgetWeighting.dat"},
-                {"6596250A", "ItemProfiles.dat"},
-                {"53310504", "Machine"},
-                {"B0784A37", "Machine"},
-                {"ED1F1715", "MainMenu"},
-                {"A897802E", "MainMenu"},
-                {"4FC32D97", "MiscParams.dat"},
-                {"610DE409", "MissionParams.dat"},
-                {"1F5B7E65", "MissionPyramid.dat"},
-                {"1EF5A009", "Podium"},
-                {"025BC99A", "Podium"},
-                {"FECF5CFC", "RacerParams.dat"},
-                {"3AA90029", "RadialBlurParams.dat"},
-                {"46713920", "RumbleParams.dat"},
-                {"7A55BD39", "SegaMiles.dat"},
-                {"AA924689", "Shopping.dat"},
-                {"A984F43F", "surfacetypes.def"},
-                {"98F6FCDF", "Test"},
-                {"0238A928", "Test"},
-                {"A80D0E83", "TrackEvents.dat"},
-                {"5514CDEE", "TrackParams.dat"},
+            string name = XPACHashes.xpachash_t_ToString(fileHash);
 
-                //Tracks.xpac (PC)
-                {"E62ED65F", "BillyHatcher_Easy"},
-                {"690F1CB8", "BillyHatcher_Easy"},
-                {"D6B5742A", "BillyHatcher_Easy_4p"},
-                {"E17AD10D", "BillyHatcher_Easy_4p"},
-                {"BABE53E0", "BillyHatcher_Easy_PCRT_SH_Data"},
-                {"1414C4BB", "BillyHatcher_Easy_PCRT_SH_Geom"},
-                {"3DDBCF20", "BillyHatcher_Hard"},
-                {"C0BC1579", "BillyHatcher_Hard"},
-                {"2E626CEB", "BillyHatcher_Hard_4p"},
-                {"3927C9CE", "BillyHatcher_Hard_4p"},
-                {"BE610C7A", "BillyHatcher_Medium"},
-                {"0AACD09B", "BillyHatcher_Medium"},
-                {"6E68B99D", "BillyHatcher_Medium_4p"},
-                {"76A86698", "BillyHatcher_Medium_4p"},
-                {"10785C5E", "CasinoPark_Easy"},
-                {"00FEFA29", "CasinoPark_Easy_4p"},
-                {"A6BDF554", "CasinoPark_Hard"},
-                {"CE2EE087", "CasinoPark_Hard_4p"},
-                {"9358175B", "CasinoPark_Medium"},
-                {"BAC9028E", "CasinoPark_Medium_4p"},
-                {"8CE05F92", "FinalFortress_Easy"},
-                {"A1C31E73", "FinalFortress_Easy_4p"},
-                {"6A63AA55", "FinalFortress_Hard"},
-                {"7F466936", "FinalFortress_Hard_4p"},
-                {"2E920F63", "FinalFortress_Medium"},
-                {"427FA84C", "FinalFortress_Medium_4p"},
-                {"1BC01720", "HOTD_Arena"},
-                {"15048861", "HOTD_Arena_4p"},
-                {"F8FD243C", "HouseOfTheDead_Easy"},
-                {"A904D15F", "HouseOfTheDead_Easy_4p"},
-                {"532C6605", "HouseOfTheDead_Hard"},
-                {"03341328", "HouseOfTheDead_Hard_4p"},
-                {"B6EA1C2F", "HouseOfTheDead_Medium"},
-                {"E97F5B6A", "HouseOfTheDead_Medium_4p"},
-                {"007E0154", "JetSetRadio_Easy"},
-                {"2F465C6D", "JetSetRadio_Easy_4p"},
-                {"ED9E97BF", "JetSetRadio_Hard"},
-                {"1C66F2D8", "JetSetRadio_Hard_4p"},
-                {"080151DD", "JetSetRadio_Medium"},
-                {"1CE410BE", "JetSetRadio_Medium_4p"},
-                {"EE947CD8", "JSR_Traffic"},
-                {"F6DD8DB9", "MonkeyBall_Arena"},
-                {"25A5E8D2", "MonkeyBall_Arena_4p"},
-                {"94AAD2E5", "RouletteTest"},
-                {"869BF2E4", "Samba_Easy"},
-                {"7FE06425", "Samba_Easy_4p"},
-                {"4A0960C7", "Samba_Hard"},
-                {"434DD208", "Samba_Hard_4p"},
-                {"DF09CF15", "Samba_Medium"},
-                {"8C15CD5E", "Samba_Medium_4p"},
-                {"9BFE2CE8", "SeasideHill_Arena"},
-                {"8C84CAB3", "SeasideHill_Arena_4p"},
-                {"C67B2F09", "SeasideHill_Easy"},
-                {"C19E1DFC", "SeasideHill_Easy"},
-                {"F5438A22", "SeasideHill_Easy_4p"},
-                {"418F4E43", "SeasideHill_Easy_4p"},
-                {"C81A91B4", "SeasideHill_Easy_PCRT_SH_Data"},
-                {"D09A407D", "SeasideHill_Easy_PCRT_SH_Geom"},
-                {"B39BC574", "SeasideHill_Hard"},
-                {"AEBEB467", "SeasideHill_Hard"},
-                {"09A915C5", "SeasideHill_Hard_Unused"},
-                {"55F4D9E6", "SeasideHill_Hard_Unused"},
-                {"E264208D", "SeasideHill_Hard_4p"},
-                {"2EAFE4AE", "SeasideHill_Hard_4p"},
-                {"B53B281F", "SeasideHill_Hard_PCRT_SH_Data"},
-                {"BDBAD6E8", "SeasideHill_Hard_PCRT_SH_Geom"},
-                {"CDFE7F92", "SeasideHill_Medium"},
-                {"C6C27F1D", "SeasideHill_Medium"},
-                {"E2E13E73", "SeasideHill_Medium_4p"},
-                {"65DFC69C", "SeasideHill_Medium_4p"},
-                {"936BB895", "SeasideHill_Medium_PCRT_SH_Data"},
-                {"4AA778A6", "SeasideHill_Medium_PCRT_SH_Geom"},
-                {"6A29DC9E", "SMB_Easy"},
-                {"F80F0F17", "SMB_Easy_4p"},
-                {"2A44A529", "SMB_Hard"},
-                {"B829D7A2", "SMB_Hard_4p"},
-                {"2D0D2E87", "SMB_Medium"},
-                {"26519FC8", "SMB_Medium_4p"},
-                {"9C41691A", "ViewerEnvironment"},
-                {"1F21AF73", "ViewerEnvironment"},
-                {"19A5C0DF", "FX/Snowflake"},
-                {"CB33CCE2", "FX/Snowflake"},
+            name = name.Replace(".\\", "");
+            name = name.Replace("\\", "/");
 
-                //packfile.xpac (X360)
-                {"BD5709AB", "SeasideHill_Easy"},
-                {"C81C668E", "SeasideHill_Easy"},
-                {"D144A294", "SeasideHill_Easy_4p"},
-                {"09DA2705", "SeasideHill_Easy_4p"},
-                {"4419D3C6", "SeasideHill_Easy_PCRT_SH_Data"},
-                {"5878075F", "SeasideHill_Easy_PCRT_SH_Geom"},
-                {"74222248", "SHE.axml"},
-                {"67512855", "SHE.xml"}
-            };
+            return name;
 
-            if (NameLookupDictionary.ContainsKey(fileHash))
-                return NameLookupDictionary[fileHash];
-            else
-                return fileHash;
+            //var NameLookupDictionary = new Dictionary<string, string>()
+            //{
+
+            //    {"7EFC3B8B", "Resource/TSOData/7EFC3B8B"},
+            //    {"0090AE05", "Resource/TSOData/0090AE05"},
+            //    {"9D853559", "Resource/TSOData/9D853559"},
+            //    {"59C8DA80", "Resource/TSOData/GroupNames"},
+            //    {"FFE6BEC5", "Resource/TSOData/ItemDefaults"},
+
+            //    {"5875B07C", "Resource/Racers/Avatar"},
+            //    {"8A3B39B7", "Resource/Racers/Avatar"},
+            //    {"3C5249FB", "Resource/Racers/Banjo"},
+            //    {"B3E850E4", "Resource/Racers/Banjo"},
+            //    {"C03C389F", "Resource/Racers/Zobio"},
+            //    {"71CA44A2", "Resource/Racers/Zobio"},
+
+            //    {"15048861" , "Resource/Tracks/HOTD_Arena_4p"},
+            //    {"F0B4ADEA" , "Resource/Tracks/HOTD_Arena_4p"},
+            //    {"0AC1CFB4" , "Resource/Tracks/HOTD_Arena_PCRT_SH_Data"},
+            //    {"25A5E8D2" , "Resource/Tracks/MonkeyBall_Arena_4p"},
+            //    {"71F1ACF3" , "Resource/Tracks/MonkeyBall_Arena_4p"},
+            //    {"00FC9F2D" , "Resource/Tracks/MonkeyBall_Arena_PCRT_SH_Data"},
+            //    {"94AAD2E5" , "Resource/Tracks/Particle_TestTrack"},
+            //    {"4638DEE8" , "Resource/Tracks/Particle_TestTrack"},
+            //    {"09A915C5" , "Resource/Tracks/SeasideHill_Hard_Unused"},
+            //    {"55F4D9E6" , "Resource/Tracks/SeasideHill_Hard_Unused"},
+
+            //    //packfile.xpac (X360)
+            //    {"BD5709AB", "SeasideHill_Easy"},
+            //    {"C81C668E", "SeasideHill_Easy"},
+            //    {"D144A294", "SeasideHill_Easy_4p"},
+            //    {"09DA2705", "SeasideHill_Easy_4p"},
+            //    {"4419D3C6", "SeasideHill_Easy_PCRT_SH_Data"},
+            //    {"5878075F", "SeasideHill_Easy_PCRT_SH_Geom"},
+            //    {"74222248", "SHE.axml"},
+            //    {"67512855", "SHE.xml"},
+            //    {"887E8163", "DLC0/AI/AI_DeathEgg.txt"}
+            //};
+
+            //if (NameLookupDictionary.ContainsKey(fileHash))
+            //    return NameLookupDictionary[fileHash];
+            //else
+            //    return fileHash;
         }
 
         public void Save(System.IO.Stream stream)

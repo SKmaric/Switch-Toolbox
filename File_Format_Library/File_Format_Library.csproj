@@ -238,12 +238,14 @@
     <Compile Include="FileFormats\Archives\QuickAccess\QuickAccessFile.cs" />
     <Compile Include="FileFormats\Archives\QuickAccess\QuickAccessFolder.cs" />
     <Compile Include="FileFormats\Archives\RARC\RARC_Parser.cs" />
+    <Compile Include="FileFormats\Archives\Sonic Racing\SiffHashes.cs" />
     <Compile Include="FileFormats\Archives\Sonic Racing\Siff.cs" />
     <Compile Include="FileFormats\Archives\Sonic Racing\SPCEnums.cs" />
-    <Compile Include="FileFormats\Archives\Sonic Racing\SubFiles\Forest.cs" />
-    <Compile Include="FileFormats\Archives\Sonic Racing\SubFiles\SIFWrapper.cs" />
-    <Compile Include="FileFormats\Archives\Sonic Racing\SubFiles\CollisionData.cs" />
+    <Compile Include="FileFormats\Archives\Sonic Racing\Siff\Forest.cs" />
+    <Compile Include="FileFormats\Archives\Sonic Racing\Siff\SIFWrapper.cs" />
+    <Compile Include="FileFormats\Archives\Sonic Racing\Siff\CollisionData.cs" />
     <Compile Include="FileFormats\Archives\Sonic Racing\XPAC.cs" />
+    <Compile Include="FileFormats\Archives\Sonic Racing\XPACHashes.cs" />
     <Compile Include="FileFormats\Archives\TRPAK\Flatbuffers\TRPAK.cs" />
     <Compile Include="FileFormats\Archives\TRPAK\TRPAK.cs" />
     <Compile Include="FileFormats\Archives\WTA.cs" />

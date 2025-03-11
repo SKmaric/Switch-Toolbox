@@ -11,10 +11,13 @@ using Toolbox.Library.Forms;
 using FirstPlugin.NodeWrappers;
 using OpenTK;
 using Siff;
+using FirstPlugin.FileFormats.Archives.Sonic_Racing;
+using System.Xml.Linq;
+using System.IO;
 
 namespace FirstPlugin
 {
-    public class Siff : SiffWrapper, IFileFormat, IArchiveFile
+    public class Siff : TreeNodeFile, IFileFormat
     {
         public FileType FileType { get; set; } = FileType.Resource;
 
@@ -83,6 +86,11 @@ namespace FirstPlugin
 
         public void Load(System.IO.Stream stream)
         {
+            FileReader GPUReader = new FileReader(new byte[0]);
+            string GPUPath = FilePath.Replace("sif", "sig");
+            if (System.IO.File.Exists(GPUPath))
+                GPUReader = new FileReader(GPUPath);
+
             CanSave = false;
 
             DrawableContainer.Name = FileName;
@@ -102,7 +110,12 @@ namespace FirstPlugin
                     reader = new FileReader(data);
                 }
 
-                reader.ByteOrder = Syroot.BinaryData.ByteOrder.BigEndian; // X360
+                // Determine endianness
+                reader.ByteOrder = Syroot.BinaryData.ByteOrder.LittleEndian;
+                reader.Seek(12, System.IO.SeekOrigin.Begin);
+                reader.ByteOrder = (reader.ReadUInt32() == 0x44332211 ? Syroot.BinaryData.ByteOrder.LittleEndian : Syroot.BinaryData.ByteOrder.BigEndian);
+                reader.Seek(0, System.IO.SeekOrigin.Begin);
+
                 uint fileID = 0;
 
                 while (!reader.EndOfStream)
@@ -137,19 +150,26 @@ namespace FirstPlugin
                         //    ptexFile.Read(reader);
                         //    break;
                         case "COLI":
-                        //    COLI coliFile = new COLI();
-                        //    coliFile.Read(reader);
-                            fileInfo.FileName = fileID + "." + "CollisionData";
+                            CollisionData coliFile = new CollisionData();
+                            coliFile.Read(reader);
+                            fileInfo.FileName = coliFile.FileName;
                             fileInfo.FileData = reader.ReadBytes((int)chunk.DataSize);
+                            fileInfo.FileDataType = FileType.Collision;
+                            Nodes.Add(coliFile);
                             break;
-                        //case "TRAK":
-                        //    TRAK trakFile = new TRAK();
-                        //    trakFile.Read(reader);
-                        //    break;
-                        //case "PVD4":
+                        case "TRAK":
+                            TRAK trakFile = new TRAK();
+                            trakFile.Read(reader);
+                            chunk.ChunkData = trakFile;
+                            fileInfo.FileName = trakFile.FileName;
+                            fileInfo.FileData = trakFile.Data;
+                            break;
+                        case "PVD4":
                         //    PVD4 pvd4File = new PVD4();
                         //    pvd4File.Read(reader);
-                        //    break;
+                            fileInfo.FileName = fileID + "." + "VisData_t";
+                            fileInfo.FileData = reader.ReadBytes((int)chunk.DataSize);
+                            break;
                         //case "BDAT":
                         //    BDAT bdatFile = new BDAT();
                         //    bdatFile.Read(reader);
@@ -183,10 +203,11 @@ namespace FirstPlugin
                         //    veg4File.Read(reader);
                         //    break;
                         case "FORE":
-                            //Forest forestFile = new Forest();
-                            //forestFile.Read(reader, chunk.DataSize);
+                            Forest forestFile = new Forest();
+                            forestFile.Read(reader, GPUReader);
                             fileInfo.FileName = fileID + "." + "Forest";
                             fileInfo.FileData = reader.ReadBytes((int)chunk.DataSize);
+                            Nodes.Add(forestFile);
                             break;
                         default:
                             fileInfo.FileName = fileID + "." + chunk.Identifier;
@@ -194,6 +215,8 @@ namespace FirstPlugin
                             break;
                     }
                     files.Add(fileInfo);
+
+                    
 
                     chunk.ReadFooter(reader);
 
@@ -230,7 +253,7 @@ namespace FirstPlugin
                 Identifier = Encoding.ASCII.GetString(reader.ReadBytes(4)).ToUpperInvariant();
                 FooterOffset = reader.ReadUInt32(); //At the end, the file name
                 DataSize = reader.ReadUInt32();
-                uint Unknown = reader.ReadUInt32();
+                uint EndianIndicator = reader.ReadUInt32();
             }
 
             public void ReadFooter(FileReader reader)
@@ -244,12 +267,29 @@ namespace FirstPlugin
 
         public class TRAK : IChunkData // Track data (checkpoints etc)
         {
-            public string FileName = "";
+            public string FileName;
             public byte[] Data;
 
             public void Read(FileReader reader)
             {
                 long pos = reader.Position;
+
+                uint m_uiNameHash = reader.ReadUInt32();
+                uint m_uiVersion = reader.ReadUInt32();
+                uint m_bRemapped = reader.ReadUInt32();
+                uint m_uiVerts = reader.ReadUInt32();
+                uint m_uiNormals = reader.ReadUInt32();
+                uint m_uiTris = reader.ReadUInt32();
+                uint m_uiWaypoints = reader.ReadUInt32();
+                uint m_uiRacingLines = reader.ReadUInt32();
+                uint m_uiTrackMarkers = reader.ReadUInt32();
+                uint m_uiTrafficRoutes = reader.ReadUInt32();
+                uint m_uiTrafficSpawn = reader.ReadUInt32();
+                uint m_uiBlockers = reader.ReadUInt32();
+                uint m_uiErrors = reader.ReadUInt32();
+                uint m_uiSpatialGroups = reader.ReadUInt32();
+
+                FileName = SiffHashes.sumohash_t_ToString(m_uiNameHash);
 
                 //reader.Seek(pos, System.IO.SeekOrigin.Begin);
                 //
