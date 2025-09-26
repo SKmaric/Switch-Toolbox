@@ -13,6 +13,9 @@ using System.Drawing;
 using System.Windows.Forms;
 using Toolbox.Library.Forms;
 using Toolbox.Library.NodeWrappers;
+using Toolbox.Library.Rendering;
+using ZeldaLib.ZeldaSceneInfo.Headers.Rooms;
+using SPICA.Rendering;
 
 namespace FirstPlugin
 {
@@ -135,11 +138,7 @@ namespace FirstPlugin
                                 }
                                 else
                                 {
-                                    TextureFile texture = new TextureFile();
-                                    texture.ImageKey = "texture";
-                                    texture.SelectedImageKey = "texture";
-                                    texture.Text = chunk.FileName;
-                                    chunk.ChunkData = texture;
+                                    chunk.ChunkData = new TextureFile();
                                 }
                                 //reader.Seek(chunk.Position + 0x64, System.IO.SeekOrigin.Begin);
                                 //chunk.FileName = reader.ReadString(Syroot.BinaryData.BinaryStringFormat.ZeroTerminated);
@@ -177,7 +176,12 @@ namespace FirstPlugin
                         case DataType.SlResourceCollision:
                             CollisionFile collisionFile = new CollisionFile();
                             collisionFile.Read(reader);
+                            chunk.FileName = collisionFile.FileName;
                             chunk.ChunkData = collisionFile;
+                            chunk.FileName = chunk.FileName.Replace(':', '/');
+                            chunk.FileName = chunk.FileName.Replace('|', '/');
+                            collisionFile.Text = chunk.FileName;
+                            Nodes.Add(collisionFile);
                             break;
                     }
 
@@ -253,9 +257,9 @@ namespace FirstPlugin
                             }
                             if (Chunks[i].ChunkData is CollisionFile)
                             {
-                                CollisionFile animFile = (CollisionFile)Chunks[i].ChunkData;
-                                fileInfo.FileName = animFile.FileName;
-                                fileInfo.FileData = animFile.Data;
+                                CollisionFile collisionFile = (CollisionFile)Chunks[i].ChunkData;
+                                fileInfo.FileName = collisionFile.FileName;
+                                fileInfo.FileData = collisionFile.Data;
                             }
                             if (Chunks[i].ChunkData is SWUTexture)
                             {
@@ -596,28 +600,190 @@ namespace FirstPlugin
 
         }
 
-        public class CollisionFile : STGenericWrapper, IChunkData
+        public class CollisionFile : TreeNodeFile, IChunkData
         {
             public string FileName = "";
             public byte[] Data;
 
+            //public List<CollisionMesh> Meshes = new List<CollisionMesh>();
+            public List<CollisionMaterial> Materials = new List<CollisionMaterial>();
+            public STSkeleton Skeleton { get; set; }
+            public GenericModelRenderer Renderer;
+
+            public DrawableContainer DrawableContainer = new DrawableContainer();
+
             public void Read(FileReader reader)
             {
+                Skeleton = new STSkeleton();
+                Renderer = new GenericModelRenderer();
+                DrawableContainer.Drawables.Add(Skeleton);
+                DrawableContainer.Drawables.Add(Renderer);
+
+                this.ImageKey = "mesh";
+                this.SelectedImageKey = "mesh";
+                this.Checked = true;
+
                 long pos = reader.Position;
 
-                uint unk3 = reader.ReadUInt32();
-                uint unk4 = reader.ReadUInt32(); 
-                uint unk5 = reader.ReadUInt32(); //Set to 1
-                uint unk6 = reader.ReadUInt32(); //Set to 3
-                uint unk7 = reader.ReadUInt32(); //dupe of unk3?
+                uint field00 = reader.ReadUInt32();
+                uint field04 = reader.ReadUInt32(); 
+                uint field08 = reader.ReadUInt32(); //Set to 1
+                uint field0c = reader.ReadUInt32(); //Set to 3
+                uint field10 = reader.ReadUInt32(); //dupe of field00?
                 uint SectionSize = reader.ReadUInt32(); //At the end, the file name
-                uint Padding = reader.ReadUInt32();
+                uint field18 = reader.ReadUInt32();
+                uint KeyOffsetsPos = reader.ReadUInt32();
 
+                reader.Seek(pos + KeyOffsetsPos, System.IO.SeekOrigin.Begin);
+
+                uint MaterialCount = reader.ReadUInt32();
+                uint MaterialsOffset = reader.ReadUInt32();
+                uint MeshCount = reader.ReadUInt32();
+                uint MeshesOffset = reader.ReadUInt32();
+
+                reader.Seek(pos + MaterialsOffset, System.IO.SeekOrigin.Begin);
+
+                for (int i = 0; i < MaterialCount; i++)
+                {
+                    CollisionMaterial material = new CollisionMaterial();
+                    material.Read(reader, pos);
+                    Materials.Add(material);
+                }
+
+                reader.Seek(pos + MeshesOffset, System.IO.SeekOrigin.Begin);
+
+                for (int i = 0; i < MeshCount; i++)
+                {
+                    CollisionMesh mesh = new CollisionMesh();
+                    mesh.Read(reader, pos);
+                    //Meshes.Add(mesh);
+                    Renderer.Meshes.Add(mesh);
+                    Nodes.Add(mesh);
+                }
+
+                // File Name + Data
                 reader.Seek(pos, System.IO.SeekOrigin.Begin);
-                //Material FILE
                 Data = reader.ReadBytes((int)SectionSize);
-
                 FileName = reader.ReadString(Syroot.BinaryData.BinaryStringFormat.ZeroTerminated);
+                Text = FileName;
+                DrawableContainer.Name = FileName;
+            }
+
+            Viewport viewport
+            {
+                get
+                {
+                    var editor = LibraryGUI.GetObjectEditor();
+                    return editor.GetViewport();
+                }
+                set
+                {
+                    var editor = LibraryGUI.GetObjectEditor();
+                    editor.LoadViewport(value);
+                }
+            }
+            bool DrawablesLoaded = false;
+            public override void OnClick(TreeView treeView)
+            {
+                if (Runtime.UseOpenGL)
+                {
+                    if (viewport == null)
+                    {
+                        viewport = new Viewport(ObjectEditor.GetDrawableContainers());
+                        viewport.Dock = DockStyle.Fill;
+                    }
+
+                    if (!DrawablesLoaded)
+                    {
+                        ObjectEditor.AddContainer(DrawableContainer);
+                        DrawablesLoaded = true;
+                    }
+
+                    viewport.ReloadDrawables(DrawableContainer);
+                    LibraryGUI.LoadEditor(viewport);
+
+                    viewport.Text = Text;
+                }
+            }
+        }
+
+        public class CollisionMaterial : STGenericMaterial, IChunkData
+        {
+            public void Read(FileReader reader, long pos = 0)
+            {
+                long offsetReturn = reader.Position;
+
+                uint matInfoOffset = reader.ReadUInt32();
+
+                reader.Seek(pos + matInfoOffset, System.IO.SeekOrigin.Begin);
+
+                uint Field00 = reader.ReadUInt32();
+                uint Field04 = reader.ReadUInt32();
+                uint Field08 = reader.ReadUInt32();
+                uint NameOffset = reader.ReadUInt32();
+
+                reader.Seek(pos + NameOffset, System.IO.SeekOrigin.Begin);
+
+                Name = reader.ReadString();
+                Text = Name;
+
+                reader.Seek(offsetReturn + 4, System.IO.SeekOrigin.Begin);
+            }
+        }
+
+        public class CollisionMesh : GenericRenderedObject, IChunkData
+        {
+            public void Read(FileReader reader, long pos = 0)
+            {
+                long offsetReturn = reader.Position;
+
+                uint meshInfoOffset = reader.ReadUInt32();
+
+                reader.Seek(pos + meshInfoOffset, System.IO.SeekOrigin.Begin);
+
+                uint Field00 = reader.ReadUInt32();
+                uint VectorCount = reader.ReadUInt32();
+                uint Field08 = reader.ReadUInt32();
+                uint VectorOffset = reader.ReadUInt32();
+                uint FaceCount = reader.ReadUInt32();
+                uint FaceInfoOffset = reader.ReadUInt32();
+
+                reader.Seek(pos + FaceInfoOffset, System.IO.SeekOrigin.Begin);
+
+                for (int i = 0; i < FaceCount; i++)
+                {
+                    uint unk0 = reader.ReadUInt32();
+                    uint FaceOffset = reader.ReadUInt32();
+                    uint unk1 = reader.ReadUInt32();
+
+                    long nextInfoOffset = reader.Position;
+
+                    reader.Seek(pos + FaceOffset, System.IO.SeekOrigin.Begin);
+
+                    Vertex vertex1 = new Vertex();
+                    vertex1.pos = reader.ReadVec3();
+                    vertices.Add(vertex1);
+
+                    Vertex vertex2 = new Vertex();
+                    vertex2.pos = reader.ReadVec3();
+                    vertices.Add(vertex2);
+
+                    Vertex vertex3 = new Vertex();
+                    vertex3.pos = reader.ReadVec3();
+                    vertices.Add(vertex3);
+
+                    uint unk2 = reader.ReadUInt32();
+
+                    faces.Add(i * 3);
+                    faces.Add(i * 3 + 1);
+                    faces.Add(i * 3 + 2);
+
+                    reader.Seek(nextInfoOffset, System.IO.SeekOrigin.Begin);
+
+                }
+                Text = "mesh";
+
+                reader.Seek(offsetReturn + 4, System.IO.SeekOrigin.Begin);
             }
         }
 

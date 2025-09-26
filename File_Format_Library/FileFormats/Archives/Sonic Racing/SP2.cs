@@ -5,10 +5,11 @@ using System.Text;
 using System.Threading.Tasks;
 using Toolbox.Library;
 using Toolbox.Library.IO;
+using DataType = SPC.DataType;
 
 namespace FirstPlugin
 {
-    public class SP2 : IFileFormat, IArchiveFile
+    public class SP2 : TreeNodeFile, IFileFormat, IArchiveFile
     {
         public FileType FileType { get; set; } = FileType.Archive;
 
@@ -46,16 +47,6 @@ namespace FirstPlugin
         public bool CanReplaceFiles { get; set; }
         public bool CanDeleteFiles { get; set; }
 
-        private const uint ChunkTextureFile = 0xD6D1820C;
-        private const uint ChunkMetaInfo = 0xB111B40E;
-        private const uint ChunkAnimInfo = 0x22008309;
-        private const uint ChunkAnimData = 0x29318F0A;
-        private const uint ChunkSkeletonData = 0x115AB800;
-        private const uint ChunkModelData = 0xCA121903;
-        private const uint ChunkShaderData = 0x777A9B0E;
-        private const uint ChunkMaterialData = 0x79C90901;
-        private const uint ChunkCollisionData = 0xD562B70B;
-
         private List<ChunkHeader> Chunks = new List<ChunkHeader>();
         public void Load(System.IO.Stream stream)
         {
@@ -67,7 +58,7 @@ namespace FirstPlugin
                 {
                     ChunkHeader chunk = new ChunkHeader();
                     chunk.Position = reader.Position;
-                    chunk.Identifier = reader.ReadUInt32();
+                    chunk.Identifier = (DataType)reader.ReadUInt32();
                     uint unk = reader.ReadUInt32();
                     chunk.ChunkSize = reader.ReadUInt32();
                     chunk.ChunkId = reader.ReadUInt32();
@@ -77,47 +68,46 @@ namespace FirstPlugin
                     uint unk3 = reader.ReadUInt32();
                     Chunks.Add(chunk);
 
-                    var Identifer = chunk.Identifier.Reverse();
-
-                    switch (Identifer)
+                    switch (chunk.Identifier)
                     {
-                        case ChunkTextureFile:
+                        case DataType.SlTexture:
                             if (chunk.ChunkSize > 0x88)
                             {
                                 reader.Seek(chunk.Position + 0x88, System.IO.SeekOrigin.Begin);
                                 chunk.FileName = reader.ReadString(Syroot.BinaryData.BinaryStringFormat.ZeroTerminated);
+                                chunk.ChunkData = new TextureFile();
                             }
                             break;
-                        case ChunkMetaInfo:
+                        case DataType.Nothing:
                             break;
-                        case ChunkAnimInfo:
+                        case DataType.SeDefinitionAnimationStreamNode:
                             if (chunk.ChunkSize > 0xB0)
                             {
                                 reader.Seek(chunk.Position + 0xB0, System.IO.SeekOrigin.Begin);
                                 chunk.FileName = reader.ReadString(Syroot.BinaryData.BinaryStringFormat.ZeroTerminated);
                             }
                             break;
-                        case ChunkAnimData:
+                        case DataType.SlAnim:
                             AnimationFile animFile = new AnimationFile();
                             animFile.Read(reader);
                             chunk.ChunkData = animFile;
                             break;
-                        case ChunkSkeletonData:
+                        case DataType.SlSkeleton:
                             SkeletonFile skelFile = new SkeletonFile();
                             skelFile.Read(reader);
                             chunk.ChunkData = skelFile;
                             break;
-                        case ChunkModelData:
+                        case DataType.SlModel:
                             ModelFile modelFile = new ModelFile();
                             modelFile.Read(reader);
                             chunk.ChunkData = modelFile;
                             break;
-                        case ChunkMaterialData:
+                        case DataType.SlMaterial2:
                             MaterialFile matFile = new MaterialFile();
                             matFile.Read(reader);
                             chunk.ChunkData = matFile;
                             break;
-                        case ChunkCollisionData:
+                        case DataType.SlResourceCollision:
                             CollisionFile collisionFile = new CollisionFile();
                             collisionFile.Read(reader);
                             chunk.ChunkData = collisionFile;
@@ -129,6 +119,7 @@ namespace FirstPlugin
 
                 ReadGPUFile(FilePath);
             }
+            TreeHelper.CreateFileDirectory(this);
         }
 
         private void ReadGPUFile(string FileName)
@@ -147,7 +138,7 @@ namespace FirstPlugin
                     {
                         long pos = reader.Position;
 
-                        var identifer = Chunks[i].Identifier.Reverse();
+                        var identifer = Chunks[i].Identifier;
 
                         var fileInfo = new FileInfo();
 
@@ -194,6 +185,27 @@ namespace FirstPlugin
                                 fileInfo.FileName = animFile.FileName;
                                 fileInfo.FileData = animFile.Data;
                             }
+                            if (identifer == DataType.SlTexture)
+                            {
+                                if (Chunks[i].FileSize != 0)
+                                {
+                                    fileInfo.FileData = reader.ReadBytes((int)Chunks[i].FileSize);
+                                    try
+                                    {
+
+                                        var texture = new DDS(fileInfo.FileData);
+                                        texture.WiiUSwizzle = false;
+                                        texture.ImageKey = "texture";
+                                        texture.SelectedImageKey = "texture";
+                                        texture.Text = Chunks[i].FileName;
+                                        Nodes.Add(texture);
+                                    }
+                                    catch
+                                    {
+                                        fileInfo.FileName = Chunks[i].FileName;
+                                    }
+                                }
+                            }
                         }
                         else //Else get the data from GPU
                         {
@@ -233,7 +245,7 @@ namespace FirstPlugin
         {
             public IChunkData ChunkData;
 
-            public uint Identifier;
+            public DataType Identifier;
             public long Position;
             public uint ChunkSize;
             public uint ChunkId;
