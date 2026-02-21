@@ -47,7 +47,9 @@ namespace FirstPlugin
         public bool CanReplaceFiles { get; set; }
         public bool CanDeleteFiles { get; set; }
 
-        private List<ChunkHeader> Chunks = new List<ChunkHeader>();
+        private List<ChunkHeader> Assets = new List<ChunkHeader>();
+
+        public bool isLittleEndian;
         public void Load(System.IO.Stream stream)
         {
             CanSave = false;
@@ -56,65 +58,65 @@ namespace FirstPlugin
             {
                 while (!reader.EndOfStream)
                 {
-                    ChunkHeader chunk = new ChunkHeader();
-                    chunk.Position = reader.Position;
-                    chunk.Identifier = (DataType)reader.ReadUInt32();
-                    uint unk = reader.ReadUInt32();
-                    chunk.ChunkSize = reader.ReadUInt32();
-                    chunk.ChunkId = reader.ReadUInt32();
-                    chunk.NextFilePtr = reader.ReadUInt32();
-                    chunk.FileSize = reader.ReadUInt32();
+                    ChunkHeader asset = new ChunkHeader();
+                    asset.Position = reader.Position;
+                    asset.DataType = (DataType)reader.ReadUInt32();
+                    asset.ToolVersion = reader.ReadUInt32();
+                    asset.CpuRelativeOffsetNextEntry = reader.ReadUInt32();
+                    asset.CpuDataLength = reader.ReadUInt32();
+                    asset.GpuRelativeOffsetNextEntry = reader.ReadUInt32();
+                    asset.GpuDataLength = reader.ReadUInt32();
                     uint unk2 = reader.ReadUInt32();
                     uint unk3 = reader.ReadUInt32();
-                    Chunks.Add(chunk);
+                    Assets.Add(asset);
 
-                    switch (chunk.Identifier)
+                    switch (asset.DataType)
                     {
                         case DataType.SlTexture:
-                            if (chunk.ChunkSize > 0x88)
+                            if (asset.CpuRelativeOffsetNextEntry > 0x88)
                             {
-                                reader.Seek(chunk.Position + 0x88, System.IO.SeekOrigin.Begin);
-                                chunk.FileName = reader.ReadString(Syroot.BinaryData.BinaryStringFormat.ZeroTerminated);
-                                chunk.ChunkData = new TextureFile();
+                                reader.Seek(asset.Position + 0x88, System.IO.SeekOrigin.Begin);
+                                asset.FileName = reader.ReadString(Syroot.BinaryData.BinaryStringFormat.ZeroTerminated);
+                                asset.ChunkData = new TextureFile();
                             }
                             break;
                         case DataType.Nothing:
                             break;
                         case DataType.SeDefinitionAnimationStreamNode:
-                            if (chunk.ChunkSize > 0xB0)
+                            if (asset.CpuRelativeOffsetNextEntry > 0xB0)
                             {
-                                reader.Seek(chunk.Position + 0xB0, System.IO.SeekOrigin.Begin);
-                                chunk.FileName = reader.ReadString(Syroot.BinaryData.BinaryStringFormat.ZeroTerminated);
+                                reader.Seek(asset.Position + 0xB0, System.IO.SeekOrigin.Begin);
+                                asset.FileName = reader.ReadString(Syroot.BinaryData.BinaryStringFormat.ZeroTerminated);
                             }
                             break;
                         case DataType.SlAnim:
                             AnimationFile animFile = new AnimationFile();
                             animFile.Read(reader);
-                            chunk.ChunkData = animFile;
+                            asset.ChunkData = animFile;
                             break;
                         case DataType.SlSkeleton:
                             SkeletonFile skelFile = new SkeletonFile();
                             skelFile.Read(reader);
-                            chunk.ChunkData = skelFile;
+                            asset.ChunkData = skelFile;
                             break;
                         case DataType.SlModel:
                             ModelFile modelFile = new ModelFile();
                             modelFile.Read(reader);
-                            chunk.ChunkData = modelFile;
+                            asset.ChunkData = modelFile;
                             break;
                         case DataType.SlMaterial2:
                             MaterialFile matFile = new MaterialFile();
                             matFile.Read(reader);
-                            chunk.ChunkData = matFile;
+                            asset.ChunkData = matFile;
                             break;
                         case DataType.SlResourceCollision:
                             CollisionFile collisionFile = new CollisionFile();
                             collisionFile.Read(reader);
-                            chunk.ChunkData = collisionFile;
+                            asset.ChunkData = collisionFile;
                             break;
                     }
 
-                    reader.Seek(chunk.Position + chunk.ChunkSize, System.IO.SeekOrigin.Begin);
+                    reader.Seek(asset.Position + asset.CpuRelativeOffsetNextEntry, System.IO.SeekOrigin.Begin);
                 }
 
                 ReadGPUFile(FilePath);
@@ -132,64 +134,57 @@ namespace FirstPlugin
             //Read the data based on CPU chunk info
             using (var reader = new FileReader(path))
             {
-                for (int i = 0; i < Chunks.Count; i++)
+                for (int i = 0; i < Assets.Count; i++)
                 {
-                    if (Chunks[i].FileSize != 0 || Chunks[i].FileName != string.Empty || Chunks[i].ChunkData != null)
+                    if (Assets[i].GpuDataLength != 0 || Assets[i].FileName != string.Empty || Assets[i].ChunkData != null)
                     {
                         long pos = reader.Position;
 
-                        var identifer = Chunks[i].Identifier;
+                        var identifer = Assets[i].DataType;
 
                         var fileInfo = new FileInfo();
 
                         //Get CPU chunk data
-                        if (Chunks[i].ChunkData != null)
+                        switch (Assets[i].DataType)
                         {
-                            if ( Chunks[i].ChunkData is AnimationFile)
-                            {
-                                AnimationFile animFile = (AnimationFile)Chunks[i].ChunkData;
+                            case DataType.SlAnim:
+                                AnimationFile animFile = (AnimationFile)Assets[i].ChunkData;
                                 fileInfo.FileName = animFile.FileName;
                                 fileInfo.FileData = animFile.Data;
-                            }
-                            if (Chunks[i].ChunkData is SkeletonFile)
-                            {
-                                SkeletonFile animFile = (SkeletonFile)Chunks[i].ChunkData;
-                                fileInfo.FileName = animFile.FileName;
-                                fileInfo.FileData = animFile.Data;
-                            }
-                            if (Chunks[i].ChunkData is MaterialFile)
-                            {
-                                MaterialFile animFile = (MaterialFile)Chunks[i].ChunkData;
-                                fileInfo.FileName = animFile.FileName;
-                                fileInfo.FileData = animFile.Data;
-                            }
-                            if (Chunks[i].ChunkData is ModelFile)
-                            {
-                                ModelFile modelFile = (ModelFile)Chunks[i].ChunkData;
+                                break;
+                            case DataType.SlSkeleton:
+                                SkeletonFile skelFile = (SkeletonFile)Assets[i].ChunkData;
+                                fileInfo.FileName = skelFile.FileName;
+                                fileInfo.FileData = skelFile.Data;
+                                break;
+                            case DataType.SlMaterial2:
+                                MaterialFile matFile = (MaterialFile)Assets[i].ChunkData;
+                                fileInfo.FileName = matFile.FileName;
+                                fileInfo.FileData = matFile.Data;
+                                break;
+                            case DataType.SlModel:
+                                ModelFile modelFile = (ModelFile)Assets[i].ChunkData;
                                 fileInfo.FileName = modelFile.FileName;
 
                                 byte[] BufferData = new byte[0];
-                                if (Chunks[i].FileSize != 0)
-                                    BufferData = reader.ReadBytes((int)Chunks[i].FileSize);
+                                if (Assets[i].GpuDataLength != 0)
+                                    BufferData = reader.ReadBytes((int)Assets[i].GpuDataLength);
 
                                 fileInfo.FileData = Utils.CombineByteArray(modelFile.Data, modelFile.Data2, modelFile.Data3, BufferData);
 
-
                                 //Don't advance the stream unless the chunk has a pointer
-                                if (Chunks[i].NextFilePtr != 0)
-                                    reader.Seek(pos + Chunks[i].NextFilePtr, System.IO.SeekOrigin.Begin);
-                            }
-                            if (Chunks[i].ChunkData is CollisionFile)
-                            {
-                                CollisionFile animFile = (CollisionFile)Chunks[i].ChunkData;
-                                fileInfo.FileName = animFile.FileName;
-                                fileInfo.FileData = animFile.Data;
-                            }
-                            if (identifer == DataType.SlTexture)
-                            {
-                                if (Chunks[i].FileSize != 0)
+                                if (Assets[i].GpuRelativeOffsetNextEntry != 0)
+                                    reader.Seek(pos + Assets[i].GpuRelativeOffsetNextEntry, System.IO.SeekOrigin.Begin);
+                                break;
+                            case DataType.SlResourceCollision:
+                                CollisionFile collisionFile = (CollisionFile)Assets[i].ChunkData;
+                                fileInfo.FileName = collisionFile.FileName;
+                                fileInfo.FileData = collisionFile.Data;
+                                break;
+                            case DataType.SlTexture:
+                                if (Assets[i].GpuDataLength != 0)
                                 {
-                                    fileInfo.FileData = reader.ReadBytes((int)Chunks[i].FileSize);
+                                    fileInfo.FileData = reader.ReadBytes((int)Assets[i].GpuDataLength);
                                     try
                                     {
 
@@ -197,27 +192,26 @@ namespace FirstPlugin
                                         texture.WiiUSwizzle = false;
                                         texture.ImageKey = "texture";
                                         texture.SelectedImageKey = "texture";
-                                        texture.Text = Chunks[i].FileName;
+                                        texture.Text = Assets[i].FileName;
                                         Nodes.Add(texture);
                                     }
                                     catch
                                     {
-                                        fileInfo.FileName = Chunks[i].FileName;
+                                        fileInfo.FileName = Assets[i].FileName;
                                     }
                                 }
-                            }
-                        }
-                        else //Else get the data from GPU
-                        {
-                            if (Chunks[i].FileName != string.Empty)
-                                fileInfo.FileName = $"{Chunks[i].FileName}";
-                            else
-                                fileInfo.FileName = $"{i} {Chunks[i].ChunkId} {identifer.ToString("X")}";
+                                break;
+                            default:
+                                if (Assets[i].FileName != string.Empty)
+                                    fileInfo.FileName = $"{Assets[i].FileName}";
+                                else
+                                    fileInfo.FileName = $"{i} {Assets[i].CpuDataLength} {identifer.ToString("X")}";
 
-                            if (Chunks[i].FileSize != 0)
-                                fileInfo.FileData = reader.ReadBytes((int)Chunks[i].FileSize);
-                            else
-                                fileInfo.FileData = new byte[0];
+                                if (Assets[i].GpuDataLength != 0)
+                                    fileInfo.FileData = reader.ReadBytes((int)Assets[i].GpuDataLength);
+                                else
+                                    fileInfo.FileData = new byte[0];
+                            break;
                         }
 
                         //Organise files such as mb into folders - won't be necessary when actual loading is implemented
@@ -227,8 +221,8 @@ namespace FirstPlugin
                         files.Add(fileInfo);
 
                         //Don't advance the stream unless the chunk has a pointer
-                        if (Chunks[i].NextFilePtr != 0)
-                            reader.Seek(pos + Chunks[i].NextFilePtr, System.IO.SeekOrigin.Begin);
+                        if (Assets[i].GpuRelativeOffsetNextEntry != 0)
+                            reader.Seek(pos + Assets[i].GpuRelativeOffsetNextEntry, System.IO.SeekOrigin.Begin);
                     }
                 }
             }
@@ -245,12 +239,13 @@ namespace FirstPlugin
         {
             public IChunkData ChunkData;
 
-            public DataType Identifier;
+            public DataType DataType;
             public long Position;
-            public uint ChunkSize;
-            public uint ChunkId;
-            public uint NextFilePtr;
-            public uint FileSize;
+            public uint ToolVersion;
+            public uint CpuRelativeOffsetNextEntry;
+            public uint CpuDataLength;
+            public uint GpuRelativeOffsetNextEntry;
+            public uint GpuDataLength;
 
             public string FileName = "";
         }

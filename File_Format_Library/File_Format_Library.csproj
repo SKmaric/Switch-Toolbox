@@ -237,6 +237,7 @@
     <Compile Include="FileFormats\Archives\QuickAccess\QuickAccessFile.cs" />
     <Compile Include="FileFormats\Archives\QuickAccess\QuickAccessFolder.cs" />
     <Compile Include="FileFormats\Archives\RARC\RARC_Parser.cs" />
+    <Compile Include="FileFormats\Archives\Sonic Racing\SPCAsset.cs" />
     <Compile Include="FileFormats\Archives\Sonic Racing\SiffHashes.cs" />
     <Compile Include="FileFormats\Archives\Sonic Racing\Siff.cs" />
     <Compile Include="FileFormats\Archives\Sonic Racing\SPCEnums.cs" />

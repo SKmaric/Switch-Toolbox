@@ -1,21 +1,21 @@
-﻿using System;
+﻿using Collada141;
+using SPC;
+using SPICA.Rendering;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using Toolbox.Library;
-using Toolbox.Library.IO;
-using SPC;
-using DataType = SPC.DataType;
-using System.Drawing;
 using System.Windows.Forms;
+using Toolbox.Library;
 using Toolbox.Library.Forms;
+using Toolbox.Library.IO;
 using Toolbox.Library.NodeWrappers;
 using Toolbox.Library.Rendering;
-using ZeldaLib.ZeldaSceneInfo.Headers.Rooms;
-using SPICA.Rendering;
+using DataType = SPC.DataType;
 
 namespace FirstPlugin
 {
@@ -57,143 +57,228 @@ namespace FirstPlugin
         public bool CanReplaceFiles { get; set; }
         public bool CanDeleteFiles { get; set; }
 
-        private List<ChunkHeader> Chunks = new List<ChunkHeader>();
+        public bool isLittleEndian;
+
+        private List<SPCAsset> Assets = new List<SPCAsset>();
+
+        private HashSet<DataType> usedDataTypes = new HashSet<DataType>();
         public void Load(System.IO.Stream stream)
         {
             CanSave = false;
 
-            using (var reader = new FileReader(stream))
+            using (var b = new FileReader(stream))
             {
-                int test = reader.ReadInt32();
-                bool isLittleEndian = Enum.IsDefined(typeof(DataType), test);
-                reader.SetByteOrder(!isLittleEndian);
+                int test = b.ReadInt32();
+                isLittleEndian = Enum.IsDefined(typeof(DataType), test);
+                b.SetByteOrder(!isLittleEndian);
 
-                reader.Seek(-4, SeekOrigin.Current);
-
-                while (!reader.EndOfStream)
+                int cpuOffset = 0;
+                int gpuOffset = 0;
+                while (cpuOffset < b.BaseStream.Length)
                 {
-                    ChunkHeader chunk = new ChunkHeader();
-                    chunk.Position = reader.Position;
-                    chunk.Identifier = (DataType)reader.ReadUInt32();
-                    chunk.ToolVersion = reader.ReadUInt32();
-                    chunk.CpuRelativeOffsetNextEntry = reader.ReadUInt32();
-                    chunk.CpuDataLength = reader.ReadUInt32();
-                    chunk.GpuRelativeOffsetNextEntry = reader.ReadUInt32();
-                    chunk.GpuDataLength = reader.ReadUInt32();
-                    uint unk2 = reader.ReadUInt32();
-                    uint unk3 = reader.ReadUInt32();
-                    Chunks.Add(chunk);
-
-                    uint resourceid = reader.ReadUInt32();
-                    uint tmpOffset = 0;
-
-                    if (chunk.Identifier != DataType.Nothing)
+                    b.BaseStream.Seek(cpuOffset, SeekOrigin.Begin);
+                    SPCAsset entry = new SPCAsset
                     {
-                        if (unk3 != 0)
+                        assetNumber = Assets.Count,
+                        dataType = (DataType)b.ReadInt32(),
+                        toolVersion = b.ReadInt32(),
+                        cpuOffsetDataHeader = cpuOffset,
+                        cpuOffsetData = cpuOffset + 0x20,
+                        cpuRelativeOffsetNextEntry = b.ReadInt32(),
+                        cpuDataLength = b.ReadInt32(),
+                        gpuOffsetData = gpuOffset,
+                        gpuRelativeOffsetNextEntry = b.ReadInt32(),
+                        gpuDataLength = b.ReadInt32(),
+                        unknown = b.ReadInt32(),
+                        name = "[No name found]"
+                    };
+
+                    int tmpOffset;
+                    uint id;
+                    if (b.ReadUInt32() != 0) // Entry type
+                    {
+                        SPCResource resource = new SPCResource(entry);
+                        entry = resource;
+
+                        resource.id = b.ReadUInt32();
+                        //FindOrCreateAssetList(resourceDictionary, resource.id).Add(resource);
+
+                        if (resource.dataType != DataType.SlResourceCollision)
                         {
-                            if (chunk.Identifier != DataType.SlResourceCollision)
-                            {
-                                tmpOffset = reader.ReadUInt32();
-                            }
-                            else
-                            {
-                                reader.Seek(chunk.Position + 0x40, SeekOrigin.Begin);
-                                tmpOffset = 0x30 + reader.ReadUInt32() * 0x14;
-                            }
-                            if (tmpOffset != 0)
-                            {
-                                reader.Seek(chunk.Position + 0x20 + tmpOffset, SeekOrigin.Begin);
-                                chunk.FileName = reader.ReadString(Syroot.BinaryData.BinaryStringFormat.ZeroTerminated);
-                            }
+                            tmpOffset = b.ReadInt32();
                         }
-                        //else
-                        //{
-                        //    reader.Seek(chunk.Position + 0x20 + 0x18 + 0x1C, SeekOrigin.Begin);
-                        //    tmpOffset = reader.ReadUInt32();
-                        //    if (tmpOffset != 0)
-                        //    {
-                        //        reader.Seek(chunk.Position + 0x20 + tmpOffset, SeekOrigin.Begin);
-                        //        chunk.FileName = reader.ReadString(Syroot.BinaryData.BinaryStringFormat.ZeroTerminated);
-                        //    }
-                        //}
+                        else
+                        {
+                            b.BaseStream.Seek(entry.cpuOffsetData + 0x20, SeekOrigin.Begin);
+                            tmpOffset = 0x30 + b.ReadInt32() * 0x14;
+                        }
+                        if (tmpOffset != 0)
+                        {
+                            b.BaseStream.Seek(entry.cpuOffsetData + tmpOffset, SeekOrigin.Begin);
+                            resource.name = b.ReadString(Syroot.BinaryData.BinaryStringFormat.ZeroTerminated);
+                        }
+
+                        switch (resource.dataType)
+                        {
+                            case DataType.SlMaterial2:
+                                b.BaseStream.Seek(entry.cpuOffsetData + 0xC, SeekOrigin.Begin);
+                                // shader
+                                id = b.ReadUInt32();
+                                resource.references.Add(new SPCResource() { id = id, dataType = DataType.SlShader });
+                                // textures
+                                for (int j = 0; j < 9; j++)
+                                {
+                                    if (j == 1)
+                                    {
+                                        continue;
+                                    }
+                                    b.BaseStream.Seek(resource.cpuOffsetData + 0x24 + j * 4, SeekOrigin.Begin);
+                                    int offset1 = b.ReadInt32();
+                                    if (offset1 == 0)
+                                    {
+                                        continue;
+                                    }
+                                    b.BaseStream.Seek(resource.cpuOffsetData + offset1 + 0xC, SeekOrigin.Begin);
+                                    id = b.ReadUInt32();
+                                    resource.references.Add(new SPCResource() { id = id, dataType = DataType.SlTexture });
+                                }
+                                // cbdesc
+                                for (int j = 0; j < 9; j++)
+                                {
+                                    b.BaseStream.Seek(resource.cpuOffsetData + 0x50 + j * 4, SeekOrigin.Begin);
+                                    int offset1 = b.ReadInt32();
+                                    if (offset1 == 0)
+                                    {
+                                        continue;
+                                    }
+                                    b.BaseStream.Seek(resource.cpuOffsetData + offset1 + 0xC, SeekOrigin.Begin);
+                                    id = b.ReadUInt32();
+                                    resource.references.Add(new SPCResource() { id = id, dataType = DataType.SlConstantBufferDesc });
+                                }
+                                break;
+                            case DataType.SlAnim:
+                                // SlSkeleton
+                                b.BaseStream.Seek(resource.cpuOffsetData + 0x10, SeekOrigin.Begin);
+                                id = b.ReadUInt32();
+                                resource.references.Add(new SPCResource() { id = id, dataType = DataType.SlSkeleton });
+                                break;
+                            case DataType.SlModel:
+                                // SlSkeleton
+                                b.BaseStream.Seek(resource.cpuOffsetData + 0xC, SeekOrigin.Begin);
+                                int offset2 = b.ReadInt32();
+                                b.BaseStream.Seek(resource.cpuOffsetData + offset2 + 0xC, SeekOrigin.Begin);
+                                id = b.ReadUInt32();
+                                if (id != 0)
+                                {
+                                    resource.references.Add(new SPCResource() { id = id, dataType = DataType.SlSkeleton });
+                                }
+                                // SlMaterial
+                                b.BaseStream.Seek(resource.cpuOffsetData + 0x40, SeekOrigin.Begin);
+                                int materialCount = b.ReadInt32();
+                                b.BaseStream.Seek(resource.cpuOffsetData + 0x60, SeekOrigin.Begin);
+                                for (int i = 0; i < materialCount; i++)
+                                {
+                                    id = b.ReadUInt32();
+                                    resource.references.Add(new SPCResource() { id = id, dataType = DataType.SlMaterial2 });
+                                }
+                                break;
+                        }
                     }
-
-                    reader.Seek(chunk.Position + 0x20, System.IO.SeekOrigin.Begin);
-
-                    switch (chunk.Identifier)
+                    else
                     {
-                        case DataType.SlTexture:
-                            if (chunk.CpuRelativeOffsetNextEntry > 0x64)
-                            {
-                                if (tmpOffset == 0xD4) // determine Wii U format texture
+                        SPCNode node = new SPCNode(entry);
+                        entry = node;
+
+                        b.BaseStream.Seek(entry.cpuOffsetData + 0x14, SeekOrigin.Begin);
+                        node.id = b.ReadUInt32();
+                        //FindOrCreateAssetList(nodeDictionary, node.id).Add(node);
+
+                        b.BaseStream.Seek(entry.cpuOffsetData + 0x1C, SeekOrigin.Begin);
+                        tmpOffset = b.ReadInt32();
+                        if (tmpOffset != 0)
+                        {
+                            b.BaseStream.Seek(entry.cpuOffsetData + tmpOffset, SeekOrigin.Begin);
+                            node.name = b.ReadString(Syroot.BinaryData.BinaryStringFormat.ZeroTerminated);
+                        }
+                        b.BaseStream.Seek(entry.cpuOffsetData + 0x24, SeekOrigin.Begin);
+                        tmpOffset = b.ReadInt32();
+                        if (tmpOffset != 0)
+                        {
+                            b.BaseStream.Seek(entry.cpuOffsetData + tmpOffset, SeekOrigin.Begin);
+                            node.shortName = b.ReadString(Syroot.BinaryData.BinaryStringFormat.ZeroTerminated);
+                        }
+                        b.BaseStream.Seek(entry.cpuOffsetData + 0x40, SeekOrigin.Begin);
+                        tmpOffset = b.ReadInt32();
+                        if (tmpOffset != 0)
+                        {
+                            b.BaseStream.Seek(entry.cpuOffsetData + tmpOffset, SeekOrigin.Begin);
+                            node.parent.Add(new SPCNode { id = b.ReadUInt32() });
+                        }
+                        b.BaseStream.Seek(entry.cpuOffsetData + 0x68, SeekOrigin.Begin);
+                        tmpOffset = b.ReadInt32();
+                        if (tmpOffset != 0)
+                        {
+                            b.BaseStream.Seek(entry.cpuOffsetData + tmpOffset, SeekOrigin.Begin);
+                            node.definition.Add(new SPCNode { id = b.ReadUInt32() });
+                        }
+                        switch (node.dataType)
+                        {
+                            case DataType.Water13DefNode:
+                                // Water13Simulation
+                                b.BaseStream.Seek(entry.cpuOffsetData + 0xD0, SeekOrigin.Begin);
+                                id = b.ReadUInt32();
+                                node.references.Add(new SPCResource() { id = id, dataType = DataType.Water13Simulation });
+                                // Water13Renderable
+                                id = b.ReadUInt32();
+                                node.references.Add(new SPCResource() { id = id, dataType = DataType.Water13Renderable });
+                                break;
+                            case DataType.Water13InstanceNode:
+                                // Water13SurfaceWavesDefNode
+                                b.BaseStream.Seek(entry.cpuOffsetData + 0x1D0, SeekOrigin.Begin);
+                                id = b.ReadUInt32();
+                                node.references.Add(new SPCNode() { id = id, dataType = DataType.Water13SurfaceWavesDefNode });
+                                // WaterShader4DefinitionNode
+                                id = b.ReadUInt32();
+                                node.references.Add(new SPCNode() { id = id, dataType = DataType.WaterShader4DefinitionNode });
+                                break;
+                            case DataType.SeDefinitionParticleEmitterNode:
+                                // SeDefinitionParticleStyleNode
+                                b.BaseStream.Seek(entry.cpuOffsetData + 0x198, SeekOrigin.Begin);
+                                id = b.ReadUInt32();
+                                node.references.Add(new SPCNode() { id = id, dataType = DataType.SeDefinitionParticleStyleNode });
+                                break;
+                            case DataType.SeDefinitionParticleStyleNode:
+                                // SeDefinitionTextureNode
+                                b.BaseStream.Seek(entry.cpuOffsetData + 0x1D0, SeekOrigin.Begin);
+                                id = b.ReadUInt32();
+                                node.references.Add(new SPCNode() { id = id, dataType = DataType.SeDefinitionTextureNode });
+                                break;
+                            case DataType.CameoObjectInstanceNode:
+                                // SeInstanceSplineNode
+                                b.BaseStream.Seek(entry.cpuOffsetData + 0x1A4, SeekOrigin.Begin);
+                                id = b.ReadUInt32();
+                                if (id != 0)
                                 {
-                                    SWUTexture texture = new SWUTexture();
-                                    texture.ImageKey = "texture";
-                                    texture.SelectedImageKey = "texture";
-                                    reader.SeekBegin(chunk.Position + 72);
-                                    texture.ReadChunk(reader);
-                                    chunk.ChunkData = texture;
-                                    texture.Text = chunk.FileName;
-                                    Nodes.Add(texture);
+                                    node.references.Add(new SPCNode() { id = id, dataType = DataType.SeInstanceSplineNode });
                                 }
-                                else
-                                {
-                                    chunk.ChunkData = new TextureFile();
-                                }
-                                //reader.Seek(chunk.Position + 0x64, System.IO.SeekOrigin.Begin);
-                                //chunk.FileName = reader.ReadString(Syroot.BinaryData.BinaryStringFormat.ZeroTerminated);
-                            }
-                            break;
-                        case DataType.Nothing:
-                            break;
-                        case DataType.SeDefinitionAnimationStreamNode:
-                            if (chunk.CpuRelativeOffsetNextEntry > 0xB0)
-                            {
-                                reader.Seek(chunk.Position + 0xB0, System.IO.SeekOrigin.Begin);
-                                chunk.FileName = reader.ReadString(Syroot.BinaryData.BinaryStringFormat.ZeroTerminated);
-                            }
-                            break;
-                        case DataType.SlAnim:
-                            AnimationFile animFile = new AnimationFile();
-                            animFile.Read(reader);
-                            chunk.ChunkData = animFile;
-                            break;
-                        case DataType.SlSkeleton:
-                            SkeletonFile skelFile = new SkeletonFile();
-                            skelFile.Read(reader);
-                            chunk.ChunkData = skelFile;
-                            break;
-                        case DataType.SlModel:
-                            ModelFile modelFile = new ModelFile();
-                            modelFile.Read(reader);
-                            chunk.ChunkData = modelFile;
-                            break;
-                        case DataType.SlMaterial2:
-                            MaterialFile matFile = new MaterialFile();
-                            matFile.Read(reader);
-                            chunk.ChunkData = matFile;
-                            break;
-                        case DataType.SlResourceCollision:
-                            CollisionFile collisionFile = new CollisionFile();
-                            collisionFile.Read(reader);
-                            chunk.FileName = collisionFile.FileName;
-                            chunk.ChunkData = collisionFile;
-                            chunk.FileName = chunk.FileName.Replace(':', '/');
-                            chunk.FileName = chunk.FileName.Replace('|', '/');
-                            collisionFile.Text = chunk.FileName;
-                            Nodes.Add(collisionFile);
-                            break;
+                                break;
+                        }
                     }
 
-                    chunk.FileName = chunk.FileName.Replace(':', '/');
-                    chunk.FileName = chunk.FileName.Replace('|', '/');
+                    cpuOffset += entry.cpuRelativeOffsetNextEntry;
+                    b.BaseStream.Seek(cpuOffset + 8, SeekOrigin.Begin);
+                    entry.cpuOffsetPointersHeader = cpuOffset;
+                    entry.cpuOffsetPointers = cpuOffset + 0x20;
+                    entry.cpuRelativeOffsetNextEntry += b.ReadInt32();
+                    entry.cpuPointersLength = b.ReadInt32();
 
-                    chunk.FileName = chunk.FileName.RemoveIllegaleFolderNameCharacters();
+                    Assets.Add(entry);
+                    usedDataTypes.Add(entry.dataType);
 
-                    reader.Seek(chunk.Position + chunk.CpuRelativeOffsetNextEntry, System.IO.SeekOrigin.Begin);
+                    cpuOffset = entry.cpuOffsetDataHeader + entry.cpuRelativeOffsetNextEntry;
+                    gpuOffset = entry.gpuOffsetData + entry.gpuRelativeOffsetNextEntry;
                 }
-
-                ReadGPUFile(FilePath);
+                //ReadGPUFile(FilePath);
             }
             TreeHelper.CreateFileDirectory(this);
         }
@@ -208,100 +293,84 @@ namespace FirstPlugin
             //Read the data based on CPU chunk info
             using (var reader = new FileReader(path))
             {
-                for (int i = 0; i < Chunks.Count; i++)
+                for (int i = 0; i < Assets.Count; i++)
                 {
-                    if (Chunks[i].GpuDataLength != 0 || Chunks[i].FileName != string.Empty || Chunks[i].ChunkData != null)
+                    if (Assets[i].gpuDataLength != 0 || Assets[i].name != string.Empty || Assets[i].ChunkData != null)
                     {
                         long pos = reader.Position;
 
-                        var identifer = Chunks[i].Identifier;
+                        var identifer = Assets[i].dataType;
 
                         var fileInfo = new FileInfo();
 
                         //Get CPU chunk data
-                        if (Chunks[i].ChunkData != null)
+                        switch (Assets[i].dataType)
                         {
-                            if (Chunks[i].ChunkData is AnimationFile)
-                            {
-                                AnimationFile animFile = (AnimationFile)Chunks[i].ChunkData;
+                            case DataType.SlAnim:
+                                AnimationFile animFile = (AnimationFile)Assets[i].ChunkData;
                                 fileInfo.FileName = animFile.FileName;
                                 fileInfo.FileData = animFile.Data;
-                            }
-                            if (Chunks[i].ChunkData is SkeletonFile)
-                            {
-                                SkeletonFile skelFile = (SkeletonFile)Chunks[i].ChunkData;
+                                break;
+                            case DataType.SlSkeleton:
+                                SkeletonFile skelFile = (SkeletonFile)Assets[i].ChunkData;
                                 fileInfo.FileName = skelFile.FileName;
                                 fileInfo.FileData = skelFile.Data;
-                            }
-                            if (Chunks[i].ChunkData is MaterialFile)
-                            {
-                                MaterialFile matFile = (MaterialFile)Chunks[i].ChunkData;
+                                break;
+                            case DataType.SlMaterial2:
+                                MaterialFile matFile = (MaterialFile)Assets[i].ChunkData;
                                 fileInfo.FileName = matFile.FileName;
                                 fileInfo.FileData = matFile.Data;
-                            }
-                            if (Chunks[i].ChunkData is ModelFile)
-                            {
-                                ModelFile modelFile = (ModelFile)Chunks[i].ChunkData;
+                                break;
+                            case DataType.SlModel:
+                                ModelFile modelFile = (ModelFile)Assets[i].ChunkData;
                                 fileInfo.FileName = modelFile.FileName;
 
                                 byte[] BufferData = new byte[0];
-                                if (Chunks[i].GpuDataLength != 0)
-                                    BufferData = reader.ReadBytes((int)Chunks[i].GpuDataLength);
+                                if (Assets[i].gpuDataLength != 0)
+                                    BufferData = reader.ReadBytes((int)Assets[i].gpuDataLength);
 
                                 fileInfo.FileData = Utils.CombineByteArray(modelFile.Data, modelFile.Data2, modelFile.Data3, BufferData);
 
-
                                 //Don't advance the stream unless the chunk has a pointer
-                                if (Chunks[i].GpuRelativeOffsetNextEntry != 0)
-                                    reader.Seek(pos + Chunks[i].GpuRelativeOffsetNextEntry, System.IO.SeekOrigin.Begin);
-                            }
-                            if (Chunks[i].ChunkData is CollisionFile)
-                            {
-                                CollisionFile collisionFile = (CollisionFile)Chunks[i].ChunkData;
+                                if (Assets[i].gpuRelativeOffsetNextEntry != 0)
+                                    reader.Seek(pos + Assets[i].gpuRelativeOffsetNextEntry, System.IO.SeekOrigin.Begin);
+                                break;
+                            case DataType.SlResourceCollision:
+                                CollisionFile collisionFile = (CollisionFile)Assets[i].ChunkData;
                                 fileInfo.FileName = collisionFile.FileName;
                                 fileInfo.FileData = collisionFile.Data;
-                            }
-                            if (Chunks[i].ChunkData is SWUTexture)
-                            {
-                                SWUTexture texFile = (SWUTexture)Chunks[i].ChunkData;
-                                if (Chunks[i].GpuDataLength != 0)
-                                    texFile.ImageData = reader.ReadBytes((int)Chunks[i].GpuDataLength);
-                            }
-                            if (Chunks[i].ChunkData is TextureFile)
-                            {
-                                TextureFile texFile = (TextureFile)Chunks[i].ChunkData;
-
-                                if (Chunks[i].GpuDataLength != 0)
+                                break;
+                            case DataType.SlTexture:
+                                if (Assets[i].gpuDataLength != 0)
                                 {
-                                    fileInfo.FileData = reader.ReadBytes((int)Chunks[i].GpuDataLength);
+                                    fileInfo.FileData = reader.ReadBytes((int)Assets[i].gpuDataLength);
                                     try
                                     {
-                                        
+
                                         var texture = new DDS(fileInfo.FileData);
                                         texture.WiiUSwizzle = false;
                                         texture.ImageKey = "texture";
                                         texture.SelectedImageKey = "texture";
-                                        texture.Text = Chunks[i].FileName;
+                                        texture.Text = Assets[i].name;
                                         Nodes.Add(texture);
                                     }
                                     catch
                                     {
-                                        fileInfo.FileName = Chunks[i].FileName;
+                                        fileInfo.FileName = Assets[i].name;
                                     }
                                 }
-                            }
-                        }
-                        else //Else get the data from GPU
-                        {
-                            if (Chunks[i].FileName != string.Empty)
-                                fileInfo.FileName = $"{Chunks[i].FileName}";
-                            else
-                                fileInfo.FileName = $"{i} {Chunks[i].CpuDataLength} {identifer.ToString("X")}";
+                                break;
+                            default:
+                                if (Assets[i].name != string.Empty)
+                                    fileInfo.FileName = $"{Assets[i].name}";
+                                else
+                                    fileInfo.FileName = $"{i} {Assets[i].cpuDataLength} {identifer.ToString("X")}";
 
-                            if (Chunks[i].GpuDataLength != 0)
-                                fileInfo.FileData = reader.ReadBytes((int)Chunks[i].GpuDataLength);
-                            else
-                                fileInfo.FileData = new byte[0];
+                                if (Assets[i].gpuDataLength != 0)
+                                    fileInfo.FileData = reader.ReadBytes((int)Assets[i].gpuDataLength);
+                                else
+                                    fileInfo.FileData = new byte[0];
+                                break;
                         }
 
                         //Organise files such as mb into folders - won't be necessary when actual loading is implemented
@@ -311,8 +380,8 @@ namespace FirstPlugin
                         files.Add(fileInfo);
 
                         //Don't advance the stream unless the chunk has a pointer
-                        if (Chunks[i].GpuRelativeOffsetNextEntry != 0)
-                            reader.Seek(pos + Chunks[i].GpuRelativeOffsetNextEntry, System.IO.SeekOrigin.Begin);
+                        if (Assets[i].gpuRelativeOffsetNextEntry != 0)
+                            reader.Seek(pos + Assets[i].gpuRelativeOffsetNextEntry, System.IO.SeekOrigin.Begin);
                     }
                 }
             }
@@ -323,22 +392,6 @@ namespace FirstPlugin
 
         }
 
-        public interface IChunkData { }
-
-        public class ChunkHeader
-        {
-            public IChunkData ChunkData;
-
-            public DataType Identifier;
-            public long Position;
-            public uint ToolVersion;
-            public uint CpuRelativeOffsetNextEntry;
-            public uint CpuDataLength;
-            public uint GpuRelativeOffsetNextEntry;
-            public uint GpuDataLength;
-
-            public string FileName = "";
-        }
 
         //Info in CPU file about the model
         //Note the GPU file chunk linked from this contains the buffers
@@ -724,7 +777,7 @@ namespace FirstPlugin
 
                 reader.Seek(pos + NameOffset, System.IO.SeekOrigin.Begin);
 
-                Name = reader.ReadString();
+                Name = reader.ReadString(Syroot.BinaryData.BinaryStringFormat.ZeroTerminated);
                 Text = Name;
 
                 reader.Seek(offsetReturn + 4, System.IO.SeekOrigin.Begin);
