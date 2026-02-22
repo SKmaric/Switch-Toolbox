@@ -279,6 +279,8 @@ namespace FirstPlugin
             {
                 foreach (var entry in Assets)
                 {
+                    bool nodeCreated = false;
+
                     var fileInfo = new FileInfo();
                     fileInfo.FileName = entry.name;
 
@@ -294,26 +296,64 @@ namespace FirstPlugin
 
                     fileInfo.FileData = cpuData;
 
-                    if (System.IO.File.Exists(gpuPath))
+                    switch (entry.dataType)
                     {
-                        using (var gpuReader = new FileReader(gpuPath))
-                        {
-                            entry.msGpuData = new MemoryStream();
-                            byte[] gpuData;
+                        // Non GPU types first
+                        case DataType.SlResourceCollision:
+                            break;
+                        default:
+                            // GPU types
+                            if (System.IO.File.Exists(gpuPath))
+                            {
+                                using (var gpuReader = new FileReader(gpuPath))
+                                {
+                                    byte[] gpuData;
+                                    gpuReader.BaseStream.Seek(entry.gpuOffsetData, SeekOrigin.Begin);
+                                    gpuData = gpuReader.ReadBytes(entry.gpuDataLength);
 
-                            gpuReader.BaseStream.Seek(entry.gpuOffsetData, SeekOrigin.Begin);
-                            gpuData = gpuReader.ReadBytes(entry.gpuDataLength);
-                            //gpuReader.BaseStream.CopyTo(entry.msGpuData, entry.gpuDataLength);
+                                    switch (entry.dataType)
+                                    {
+                                        case DataType.SlTexture:
+                                            try
+                                            {
+                                                var texture = new DDS(gpuData);
+                                                texture.WiiUSwizzle = false;
+                                                texture.ImageKey = "texture";
+                                                texture.SelectedImageKey = "texture";
+                                                texture.Text = entry.name;
+                                                Nodes.Add(texture);
+                                                nodeCreated = true;
+                                            }
+                                            catch
+                                            {
+                                                fileInfo.FileData = gpuData;
+                                            }
+                                            break;
+                                        default:
+                                            entry.msGpuData = new MemoryStream();
 
-                            //fileInfo.FileData = Utils.CombineByteArray(fileInfo.FileData, entry.msGpuData.ToBytes());
-                            fileInfo.FileData = Utils.CombineByteArray(fileInfo.FileData, gpuData);
-                        }
+                                            //gpuReader.BaseStream.CopyTo(entry.msGpuData, entry.gpuDataLength);
+
+                                            //fileInfo.FileData = Utils.CombineByteArray(fileInfo.FileData, entry.msGpuData.ToBytes());
+                                            fileInfo.FileData = Utils.CombineByteArray(fileInfo.FileData, gpuData);
+                                            break;
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                // warning GPU file not found
+                            }
+                            break;
                     }
+
+
                     //Organise files such as mb into folders - won't be necessary when actual loading is implemented
                     fileInfo.FileName = fileInfo.FileName.Replace(":", ":/");
                     fileInfo.FileName = fileInfo.FileName.Replace("|", "|/");
 
-                    files.Add(fileInfo);
+                    if (!nodeCreated)
+                        files.Add(fileInfo);
                 }
             }
         }
