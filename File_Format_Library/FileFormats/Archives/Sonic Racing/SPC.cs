@@ -103,15 +103,11 @@ namespace FirstPlugin
                         resource.id = b.ReadUInt32();
                         //FindOrCreateAssetList(resourceDictionary, resource.id).Add(resource);
 
-                        if (resource.dataType != DataType.SlResourceCollision)
-                        {
-                            tmpOffset = b.ReadInt32();
-                        }
-                        else
-                        {
-                            b.BaseStream.Seek(entry.cpuOffsetData + 0x20, SeekOrigin.Begin);
-                            tmpOffset = 0x30 + b.ReadInt32() * 0x14;
-                        }
+                        if (resource.dataType == DataType.SlResourceCollision)
+                            b.BaseStream.Seek(0x10, SeekOrigin.Current);
+
+                        tmpOffset = b.ReadInt32();
+
                         if (tmpOffset != 0)
                         {
                             b.BaseStream.Seek(entry.cpuOffsetData + tmpOffset, SeekOrigin.Begin);
@@ -279,8 +275,56 @@ namespace FirstPlugin
                     gpuOffset = entry.gpuOffsetData + entry.gpuRelativeOffsetNextEntry;
                 }
                 //ReadGPUFile(FilePath);
+                GetData(FilePath);
             }
             TreeHelper.CreateFileDirectory(this);
+        }
+
+        private void GetData(string cpuPath)
+        {
+            string gpuPath = cpuPath.Replace("cpu", "gpu");
+
+            using (var cpuReader = new FileReader(cpuPath))
+            {
+                foreach (var entry in Assets)
+                {
+                    var fileInfo = new FileInfo();
+                    fileInfo.FileName = entry.name;
+
+                    entry.msCpuData = new MemoryStream();
+
+                    byte[] cpuData;
+
+                    cpuReader.BaseStream.Seek(entry.cpuOffsetData, SeekOrigin.Begin);
+                    cpuData = cpuReader.ReadBytes(entry.cpuDataLength);
+                    //cpuReader.BaseStream.CopyTo(entry.msCpuData, entry.cpuDataLength);
+
+                    //fileInfo.FileData = entry.msCpuData.ToBytes();
+
+                    fileInfo.FileData = cpuData;
+
+                    if (System.IO.File.Exists(gpuPath))
+                    {
+                        using (var gpuReader = new FileReader(gpuPath))
+                        {
+                            entry.msGpuData = new MemoryStream();
+                            byte[] gpuData;
+
+                            gpuReader.BaseStream.Seek(entry.gpuOffsetData, SeekOrigin.Begin);
+                            gpuData = gpuReader.ReadBytes(entry.gpuDataLength);
+                            //gpuReader.BaseStream.CopyTo(entry.msGpuData, entry.gpuDataLength);
+
+                            //fileInfo.FileData = Utils.CombineByteArray(fileInfo.FileData, entry.msGpuData.ToBytes());
+                            fileInfo.FileData = Utils.CombineByteArray(fileInfo.FileData, gpuData);
+                        }
+                    }
+                    //Organise files such as mb into folders - won't be necessary when actual loading is implemented
+                    fileInfo.FileName = fileInfo.FileName.Replace(":", ":/");
+                    fileInfo.FileName = fileInfo.FileName.Replace("|", "|/");
+
+                    files.Add(fileInfo);
+                }
+            }
         }
 
         private void ReadGPUFile(string FileName)
