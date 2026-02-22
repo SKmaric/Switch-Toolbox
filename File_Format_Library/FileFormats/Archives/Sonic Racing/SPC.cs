@@ -24,8 +24,8 @@ namespace FirstPlugin
         public FileType FileType { get; set; } = FileType.Archive;
 
         public bool CanSave { get; set; }
-        public string[] Description { get; set; } = new string[] { "Sonic and All Stars Racing Transformed Archive" };
-        public string[] Extension { get; set; } = new string[] { "*.spc", "*.swu" };
+        public string[] Description { get; set; } = new string[] { "Sonic Racing Archive" };
+        public string[] Extension { get; set; } = new string[] { "*.spc", "*.swu", "*.sp2" };
         public string FileName { get; set; }
         public string FilePath { get; set; }
         public IFileInfo IFileInfo { get; set; }
@@ -34,7 +34,7 @@ namespace FirstPlugin
         {
             using (var reader = new Toolbox.Library.IO.FileReader(stream, true))
             {
-                return (Utils.HasExtension(FileName, ".spc") | (Utils.HasExtension(FileName, ".swu")));
+                return (Utils.HasExtension(FileName, ".spc") | (Utils.HasExtension(FileName, ".swu")) | (Utils.HasExtension(FileName, ".sp2")));
             }
         }
 
@@ -58,6 +58,8 @@ namespace FirstPlugin
         public bool CanDeleteFiles { get; set; }
 
         public bool isLittleEndian;
+
+        public bool useFullCpuData = false;
 
         private List<SPCAsset> Assets = new List<SPCAsset>();
 
@@ -103,8 +105,13 @@ namespace FirstPlugin
                         resource.id = b.ReadUInt32();
                         //FindOrCreateAssetList(resourceDictionary, resource.id).Add(resource);
 
-                        if (resource.dataType == DataType.SlResourceCollision)
-                            b.BaseStream.Seek(0x10, SeekOrigin.Current);
+                        if (entry.toolVersion == 0x2e) // Team Sonic Racing / SP2
+                            b.BaseStream.Seek(0x04, SeekOrigin.Current);
+                        else //(entry.toolVersion == 0x22) // ASRT / SPC
+                        {
+                            if (resource.dataType == DataType.SlResourceCollision)
+                                b.BaseStream.Seek(0x10, SeekOrigin.Current);
+                        }
 
                         tmpOffset = b.ReadInt32();
 
@@ -168,6 +175,8 @@ namespace FirstPlugin
                                 {
                                     resource.references.Add(new SPCResource() { id = id, dataType = DataType.SlSkeleton });
                                 }
+                                if (entry.toolVersion == 0x2e)
+                                    break;
                                 // SlMaterial
                                 b.BaseStream.Seek(resource.cpuOffsetData + 0x40, SeekOrigin.Begin);
                                 int materialCount = b.ReadInt32();
@@ -296,15 +305,22 @@ namespace FirstPlugin
 
                     entry.msCpuData = new MemoryStream();
 
-                    byte[] cpuData;
+                    cpuReader.BaseStream.Seek(entry.cpuOffsetDataHeader, SeekOrigin.Begin);
+
+                    entry.msCpuData.Write(cpuReader.ReadBytes(entry.cpuRelativeOffsetNextEntry), 0, entry.cpuRelativeOffsetNextEntry);
+
+                    if (useFullCpuData)
+                    {
+                        fileInfo.FileData = new byte[entry.cpuRelativeOffsetNextEntry];
+                        Buffer.BlockCopy(entry.msCpuData.GetBuffer(), 0, fileInfo.FileData, 0, entry.cpuRelativeOffsetNextEntry);
+                    }
+                    else
+                    {
+                        fileInfo.FileData = new byte[entry.cpuDataLength];
+                        Buffer.BlockCopy(entry.msCpuData.GetBuffer(), 0x20, fileInfo.FileData, 0, entry.cpuDataLength);
+                    }
 
                     cpuReader.BaseStream.Seek(entry.cpuOffsetData, SeekOrigin.Begin);
-                    cpuData = cpuReader.ReadBytes(entry.cpuDataLength);
-                    //cpuReader.BaseStream.CopyTo(entry.msCpuData, entry.cpuDataLength);
-
-                    //fileInfo.FileData = entry.msCpuData.ToBytes();
-
-                    fileInfo.FileData = cpuData;
 
                     switch (entry.dataType)
                     {
@@ -318,15 +334,22 @@ namespace FirstPlugin
                                 using (var gpuReader = new FileReader(gpuPath))
                                 {
                                     gpuReader.SetByteOrder(!isLittleEndian);
-                                    byte[] gpuData;
+
+                                    entry.msGpuData = new MemoryStream();
+                                    
                                     gpuReader.BaseStream.Seek(entry.gpuOffsetData, SeekOrigin.Begin);
-                                    gpuData = gpuReader.ReadBytes(entry.gpuDataLength);
+
+                                    entry.msGpuData.Write(gpuReader.ReadBytes(entry.gpuDataLength), 0, entry.gpuDataLength);
+
+                                    byte[] gpuData = new byte[entry.gpuDataLength];
+
+                                    Buffer.BlockCopy(entry.msGpuData.GetBuffer(), 0, gpuData, 0, entry.gpuDataLength);
 
                                     switch (entry.dataType)
                                     {
                                         case DataType.SlTexture:
                                             // Determine Wii U format
-                                            cpuReader.BaseStream.Seek(entry.cpuOffsetData + 0x04, SeekOrigin.Begin);
+                                            cpuReader.BaseStream.Seek(0x04, SeekOrigin.Current);
                                             var test = cpuReader.ReadUInt32();
                                             if (test == 0xD4)
                                             {
@@ -365,12 +388,13 @@ namespace FirstPlugin
                                                 }
                                             }
                                             break;
+                                        case DataType.SlModel:
+                                            fileInfo.FileData = Utils.CombineByteArray(fileInfo.FileData, gpuData);
+                                            break;
+                                        case DataType.SlModelResource:
+                                            fileInfo.FileData = Utils.CombineByteArray(fileInfo.FileData, gpuData);
+                                            break;
                                         default:
-                                            entry.msGpuData = new MemoryStream();
-                                            
-                                            //gpuReader.BaseStream.CopyTo(entry.msGpuData, entry.gpuDataLength);
-
-                                            //fileInfo.FileData = Utils.CombineByteArray(fileInfo.FileData, entry.msGpuData.ToBytes());
                                             fileInfo.FileData = Utils.CombineByteArray(fileInfo.FileData, gpuData);
                                             break;
                                     }
@@ -383,10 +407,10 @@ namespace FirstPlugin
                             break;
                     }
 
-                    
+
                     //Organise files such as mb into folders - won't be necessary when actual loading is implemented
-                    fileInfo.FileName = fileInfo.FileName.Replace(":", ":/");
-                    fileInfo.FileName = fileInfo.FileName.Replace("|", "|/");
+                    fileInfo.FileName = fileInfo.FileName.Replace(':', '/');
+                    fileInfo.FileName = fileInfo.FileName.Replace('|', '/');
 
                     if (!nodeCreated)
                         files.Add(fileInfo);
